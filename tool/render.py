@@ -59,14 +59,35 @@ body{{background:{t['bg']};color:{t['ink']};font-family:{FONT};position:relative
 <div class="foot">재미로 보는 운세예요 🙂</div>
 </body></html>"""
 
-def zodiac_card(z, accent):
+ZODIAC_EMOJI = {"쥐": "🐭", "소": "🐮", "범": "🐯", "호랑이": "🐯", "토끼": "🐰", "용": "🐲", "뱀": "🐍",
+                "말": "🐴", "양": "🐑", "원숭이": "🐵", "닭": "🐔", "개": "🐶", "돼지": "🐷"}
+
+def ranks(items):
+    """Rank 1..N. Uses explicit 'rank' if every item has one, else stars desc, ties in list order."""
+    if all("rank" in it for it in items):
+        return [it["rank"] for it in items]
+    order = sorted(range(len(items)), key=lambda i: (-items[i]["stars"], i))
+    r = [0] * len(items)
+    for pos, i in enumerate(order, 1):
+        r[i] = pos
+    return r
+
+def rank_pill(n, accent, size=30):
+    medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(n, "")
+    style = (f"background:{accent};color:#fff" if n <= 3 else "background:rgba(0,0,0,.06);color:inherit")
+    return (f'<span style="{style};font-size:{size}px;font-weight:800;padding:6px 18px;border-radius:999px;'
+            f'white-space:nowrap">{medal}{n}위</span>')
+
+def zodiac_card(z, accent, rank):
     win = z["stars"] == 5
     badge = '<div class="badge">👑 오늘의 1등 띠</div>' if win else ""
     return f"""<div class="card{' win' if win else ''}">{badge}
   <div style="display:flex;align-items:center;gap:36px">
     <div class="e" style="font-size:120px;line-height:1">{z['emoji']}</div>
-    <div>
-      <div style="font-size:60px;font-weight:800">{esc(z['name'])}</div>
+    <div style="flex:1">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:60px;font-weight:800">{esc(z['name'])}</div>{'' if win else rank_pill(rank, accent)}
+      </div>
       <div style="font-size:48px;letter-spacing:.08em;margin-top:4px">{stars(z['stars'], accent)}</div>
     </div>
   </div>
@@ -75,16 +96,17 @@ def zodiac_card(z, accent):
        <span class="chip">행운의 숫자 · {z['num']}</span></div>
 </div>"""
 
-def mbti_row(m, accent):
+def mbti_row(m, accent, rank):
     win = m["stars"] == 5
     badge = '<div class="badge" style="top:-24px;font-size:24px">👑 오늘의 1등 MBTI</div>' if win else ""
     return f"""<div class="card{' win' if win else ''}" style="padding:26px 40px 30px;border-radius:34px">{badge}
   <div style="display:flex;align-items:center;justify-content:space-between">
-    <div style="display:flex;align-items:center;gap:20px">
+    <div style="display:flex;align-items:center;gap:18px">
       <div style="font-size:48px;font-weight:900;letter-spacing:.04em">{m['type']}</div>
       <span class="chip" style="font-size:25px;padding:6px 20px;margin:0">🍀 {esc(m['lucky'])}</span>
     </div>
-    <div style="font-size:36px;letter-spacing:.06em">{stars(m['stars'], accent)}</div>
+    <div style="display:flex;align-items:center;gap:14px">{'' if win else rank_pill(rank, accent, 24)}
+      <div style="font-size:34px;letter-spacing:.04em">{stars(m['stars'], accent)}</div></div>
   </div>
   <div style="font-size:33px;font-weight:600;line-height:1.4;margin-top:12px">{esc(m['text'])}</div>
 </div>"""
@@ -92,49 +114,85 @@ def mbti_row(m, accent):
 def center(lines):
     return f'<div class="wrap" style="align-items:center;text-align:center;gap:34px">{lines}</div>'
 
+def podium(names, t):
+    """Cover preview of today's top 3: list of (label, emoji-or-'')."""
+    items = "".join(
+        f'<div style="display:flex;flex-direction:column;align-items:center;gap:6px;min-width:200px">'
+        f'<div style="font-size:44px">{m}</div><div class="e" style="font-size:64px;line-height:1.1">{e}</div>'
+        f'<div style="font-size:36px;font-weight:800">{esc(n)}</div></div>'
+        for m, (n, e) in zip(("🥇", "🥈", "🥉"), names))
+    return f'<div style="display:flex;gap:28px;justify-content:center;margin-top:8px">{items}</div>'
+
+def chem_page(title, pairs, t):
+    """'오늘의 찰떡 궁합' slide. pairs: [{"a","b","text"}] (띠 names or MBTI types)."""
+    def lab(x):
+        e = ZODIAC_EMOJI.get(x.replace("띠", ""), "")
+        return f'<span class="e">{e}</span> {esc(x)}' if e else esc(x)
+    cards = "".join(
+        f'<div class="card" style="padding:36px 44px">'
+        f'<div style="font-size:30px;font-weight:800;color:{t["accent"]}">{m} TOP {i}</div>'
+        f'<div style="font-size:50px;font-weight:900;margin:8px 0 10px">{lab(p["a"])} <span style="color:{t["accent"]}">×</span> {lab(p["b"])}</div>'
+        f'<div style="font-size:36px;font-weight:600;line-height:1.4">{esc(p["text"])}</div></div>'
+        for i, (m, p) in enumerate(zip(("💞", "💕", "💗"), pairs), 1))
+    head = f'<div style="font-size:58px;font-weight:900;text-align:center;margin-bottom:8px">{title}</div>'
+    tail = (f'<div style="font-size:34px;font-weight:700;text-align:center;color:{t["sub"]}">'
+            f'📩 궁합 좋은 친구에게 보내주세요</div>')
+    return f'<div class="wrap" style="gap:30px">{head}{cards}{tail}</div>'
+
+def outro(t, lines):
+    return center(f"""
+      <div class="e" style="font-size:130px">📩</div>
+      <div style="font-size:70px;font-weight:900;line-height:1.3">{lines}</div>
+      <div style="display:flex;flex-direction:column;gap:22px;margin-top:10px;font-size:40px;font-weight:700">
+        <div style="background:{t['card']};padding:22px 40px;border-radius:999px">📩 친구에게 보내서 운세 비교하기</div>
+        <div style="background:{t['card']};padding:22px 40px;border-radius:999px">📌 저장하고 하루 3번 꺼내보기</div>
+        <div style="background:{t['ink']};color:#fff;padding:22px 40px;border-radius:999px">🔔 팔로우하면 매일 아침 6시 업데이트</div>
+      </div>""")
+
 def build(d):
     pages = []
     tz, tm = THEMES["zodiac"], THEMES["mbti"]
     zs = d["zodiac"]
-    win = next(z for z in zs if z["stars"] == 5)
-    # 띠별 1: cover
+    zr = ranks(zs)
+    top3 = sorted(range(12), key=lambda i: zr[i])[:3]
     emojis = "".join(z["emoji"] for z in zs)
     pages.append(("zodiac", center(f"""
       <div style="font-size:34px;font-weight:700;color:{tz['accent']};letter-spacing:.2em">DAILY FORTUNE</div>
-      <div style="font-size:112px;font-weight:900;line-height:1.15">오늘의<br>띠별 운세</div>
+      <div style="font-size:104px;font-weight:900;line-height:1.12">오늘의<br>띠별 운세</div>
       <div style="font-size:42px;font-weight:600">{esc(d['date_label'])}</div>
-      <div style="font-size:36px;color:{tz['sub']}">{esc(d['season_line'])}</div>
-      <div class="e" style="font-size:62px;letter-spacing:6px;margin-top:20px;line-height:1.4">{emojis[:12]}<br>{emojis[12:]}</div>
-      <div style="font-size:36px;font-weight:700;background:{tz['ink']};color:#fff;padding:20px 44px;border-radius:999px;margin-top:10px">
-        👑 1등은 {esc(win['name'])} · 넘겨서 확인 👉</div>"""), "띠별 운세"))
+      <div style="font-size:34px;color:{tz['sub']}">{esc(d['season_line'])}</div>
+      {podium([(zs[i]['name'], zs[i]['emoji']) for i in top3], tz)}
+      <div style="font-size:36px;font-weight:700;background:{tz['ink']};color:#fff;padding:20px 44px;border-radius:999px;margin-top:6px">
+        내 띠는 몇 위? 넘겨서 확인 👉</div>"""), "띠별 운세"))
     for i in range(0, 12, 2):
-        body = '<div class="wrap">' + zodiac_card(zs[i], tz["accent"]) + zodiac_card(zs[i+1], tz["accent"]) + "</div>"
+        body = ('<div class="wrap">' + zodiac_card(zs[i], tz["accent"], zr[i])
+                + zodiac_card(zs[i + 1], tz["accent"], zr[i + 1]) + "</div>")
         pages.append(("zodiac", body, "띠별 운세"))
-    pages.append(("zodiac", center(f"""
-      <div class="e" style="font-size:150px">💬</div>
-      <div style="font-size:72px;font-weight:900;line-height:1.3">댓글에<br>내 띠를 남겨주세요</div>
-      <div style="font-size:44px;font-weight:600;color:{tz['sub']}">한 줄 운세를 답글로 보내드려요!</div>
-      <div style="font-size:34px;margin-top:20px;color:{tz['sub']}">예) 말띠 · 쥐띠 · 돼지띠</div>"""), "띠별 운세"))
+    if d.get("ddi_chem"):
+        pages.append(("zodiac", chem_page("오늘의 찰떡 궁합", d["ddi_chem"][:3], tz), "띠별 운세"))
+    pages.append(("zodiac", outro(tz, "오늘 내 띠<br>몇 위였나요?"), "띠별 운세"))
 
     groups = d["mbti_groups"]
-    mwin = next(t for g in groups for t in g["types"] if t["stars"] == 5)
+    flat = [t for g in groups for t in g["types"]]
+    mr = ranks(flat)
+    mrank = {t["type"]: r for t, r in zip(flat, mr)}
+    mtop3 = sorted(flat, key=lambda t: mrank[t["type"]])[:3]
     m_pages = [("mbti", center(f"""
       <div style="font-size:34px;font-weight:700;color:{tm['accent']};letter-spacing:.2em">DAILY FORTUNE</div>
-      <div style="font-size:112px;font-weight:900;line-height:1.15">오늘의<br>MBTI 운세</div>
+      <div style="font-size:104px;font-weight:900;line-height:1.12">오늘의<br>MBTI 운세</div>
       <div style="font-size:42px;font-weight:600">{esc(d['date_label'])}</div>
-      <div style="font-size:36px;color:{tm['sub']}">{esc(d['season_line'])}</div>
-      <div style="font-size:40px;font-weight:800;letter-spacing:.1em;margin-top:16px;color:{tm['accent']}">NT · NF · SJ · SP</div>
-      <div style="font-size:36px;font-weight:700;background:{tm['ink']};color:#fff;padding:20px 44px;border-radius:999px;margin-top:10px">
-        👑 1등은 {mwin['type']} · 넘겨서 확인 👉</div>"""), "MBTI 운세")]
+      <div style="font-size:34px;color:{tm['sub']}">{esc(d['season_line'])}</div>
+      {podium([(t['type'], '') for t in mtop3], tm)}
+      <div style="font-size:36px;font-weight:700;background:{tm['ink']};color:#fff;padding:20px 44px;border-radius:999px;margin-top:6px">
+        내 MBTI는 몇 위? 넘겨서 확인 👉</div>"""), "MBTI 운세")]
     for g in groups:
-        rows = "".join(mbti_row(t, tm["accent"]) for t in g["types"])
+        rows = "".join(mbti_row(t, tm["accent"], mrank[t["type"]]) for t in g["types"])
         title = (f'<div style="font-size:50px;font-weight:900;margin-bottom:6px">{g["code"]} '
                  f'<span style="color:{tm["accent"]}">{esc(g["label"])}</span></div>')
         m_pages.append(("mbti", f'<div class="wrap" style="gap:26px">{title}{rows}</div>', "MBTI 운세"))
-    m_pages.append(("mbti", center(f"""
-      <div class="e" style="font-size:150px">📌</div>
-      <div style="font-size:72px;font-weight:900;line-height:1.3">저장해두고<br>오늘 하루 틈틈이</div>
-      <div style="font-size:44px;font-weight:600;color:{tm['sub']}">같은 MBTI 친구에게 공유해요 👥</div>"""), "MBTI 운세"))
+    if d.get("mbti_chem"):
+        m_pages.append(("mbti", chem_page("오늘의 MBTI 케미", d["mbti_chem"][:3], tm), "MBTI 운세"))
+    m_pages.append(("mbti", outro(tm, "오늘 내 MBTI<br>몇 위였나요?"), "MBTI 운세"))
 
     out = []
     for n, (th, body, head) in enumerate(pages, 1):
@@ -169,14 +227,50 @@ def has_blank_patch(png):
     pts = [(x, y) for x in range(0, w, 8) for y in (h - 4, h - 40)] + [(w - 4, y) for y in range(0, h, 8)]
     return any(im.getpixel(p) == (255, 255, 255) for p in pts)
 
+def find_ffmpeg():
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        sys.exit("ffmpeg not found: install it or `python3 -m pip install imageio-ffmpeg`")
+
+def make_reel(out, slides, bg, dest):
+    """9:16 silent slideshow for Reels (Instagram adds licensed music on top).
+    Each 1080x1350 card is scaled to 918x1148 and placed at y=230 so it stays inside the
+    Reels safe zone (top 230px and bottom ~480px are covered by Instagram UI)."""
+    ff = find_ffmpeg()
+    durs = [2.6] + [2.0] * (len(slides) - 2) + [2.4]
+    inputs, chains = [], []
+    for i, (s, dur) in enumerate(zip(slides, durs)):
+        inputs += ["-loop", "1", "-t", f"{dur}", "-i", str(out / s)]
+        chains.append(f"[{i}:v]scale=918:1148,pad=1080:1920:81:230:color={bg},setsar=1,fps=30,format=yuv420p[v{i}]")
+    # 0.3s crossfades between cards
+    xf, last, t = [], "v0", durs[0]
+    for i in range(1, len(slides)):
+        t -= 0.3
+        xf.append(f"[{last}][v{i}]xfade=transition=fade:duration=0.3:offset={t:.2f}[x{i}]")
+        last, t = f"x{i}", t + durs[i]
+    graph = ";".join(chains + xf)
+    subprocess.run([ff, "-y", *inputs, "-filter_complex", graph, "-map", f"[{last}]", "-c:v", "libx264",
+                    "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                    "-r", "30", str(dest)], check=True, capture_output=True, timeout=300)
+    print("ok", dest.name, f"{t:.1f}s")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data"); ap.add_argument("out"); ap.add_argument("--browser")
+    ap.add_argument("--no-reel", action="store_true")
     a = ap.parse_args()
     d = json.load(open(a.data, encoding="utf-8"))
     out = Path(a.out).resolve(); (out / "html").mkdir(parents=True, exist_ok=True)
+    for old in list(out.glob("ddi_*.png")) + list(out.glob("mbti_*.png")):
+        old.unlink()  # slide count can change between runs
     br = find_browser(a.browser)
-    for name, doc in build(d):
+    pages = build(d)
+    for name, doc in pages:
         hp = out / "html" / name.replace(".png", ".html")
         hp.write_text(doc, encoding="utf-8")
         args = [br, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
@@ -192,6 +286,9 @@ def main():
         else:
             sys.exit(f"render failed for {name}")
         print("ok", name)
+    if not a.no_reel:
+        ddi = [n for n, _ in pages if n.startswith("ddi_")]
+        make_reel(out, ddi, "0xF9E2D3", out / "reel.mp4")
 
 if __name__ == "__main__":
     main()
