@@ -1,0 +1,45 @@
+{
+  "date_label": "2026년 11월 21일 토요일",
+  "date_short": "11.21 SAT",
+  "season_line": "🍂 늦가을 주말, 내일은 절기 소설",
+  "zodiac": [
+    {"emoji": "🐭", "name": "쥐띠", "stars": 3, "text": "주말 낮잠 한숨이 기분을 말끔히 바꿔줘요", "color": "연두", "hex": "#A8D672", "num": 2},
+    {"emoji": "🐮", "name": "소띠", "stars": 4, "text": "꾸준히 해온 일에 반가운 칭찬이 따라와요", "color": "황토색", "hex": "#C08A3E", "num": 8},
+    {"emoji": "🐯", "name": "범띠", "stars": 3, "text": "새로운 장소에서 기분 좋은 영감을 얻어요", "color": "청록", "hex": "#2A9D8F", "num": 5},
+    {"emoji": "🐰", "name": "토끼띠", "stars": 5, "text": "기다리던 소식이 주말 선물처럼 찾아와요", "color": "라벤더", "hex": "#B9A6E0", "num": 1},
+    {"emoji": "🐲", "name": "용띠", "stars": 2, "text": "계획보다 쉼이 필요한 하루, 천천히 가세요", "color": "아이보리", "hex": "#F4EEDC", "num": 9},
+    {"emoji": "🐍", "name": "뱀띠", "stars": 4, "text": "오랜만에 연락한 친구와 대화가 술술 풀려요", "color": "와인색", "hex": "#7B2D3B", "num": 3},
+    {"emoji": "🐴", "name": "말띠", "stars": 3, "text": "가벼운 산책이 머릿속을 시원하게 정리해줘요", "color": "하늘색", "hex": "#8EC9EE", "num": 6},
+    {"emoji": "🐑", "name": "양띠", "stars": 2, "text": "말 한마디 신중하면 웃으며 하루를 마쳐요", "color": "민트", "hex": "#9ED9C4", "num": 0},
+    {"emoji": "🐵", "name": "원숭이띠", "stars": 4, "text": "재치 있는 한마디가 모임 분위기를 띄워요", "color": "노랑", "hex": "#F2C94C", "num": 7},
+    {"emoji": "🐔", "name": "닭띠", "stars": 3, "text": "미뤄둔 정리를 끝내면 마음이 홀가분해요", "color": "회색", "hex": "#8E9196", "num": 4},
+    {"emoji": "🐶", "name": "개띠", "stars": 2, "text": "오늘은 남의 일보다 내 마음을 먼저 챙겨요", "color": "주황", "hex": "#F08A3C", "num": 1},
+    {"emoji": "🐷", "name": "돼지띠", "stars": 4, "text": "맛있는 한 끼가 주말을 더 행복하게 해줘요", "color": "분홍", "hex": "#F4A6B8", "num": 8}
+  ],
+  "mbti_groups": [
+    {"code": "NT", "label": "분석가형", "types": [
+      {"type": "INTJ", "stars": 3, "text": "느긋한 주말, 계획 없이 쉬어도 괜찮아요", "lucky": "따뜻한 차"},
+      {"type": "INTP", "stars": 4, "text": "엉뚱한 호기심이 재밌는 발견으로 이어져요", "lucky": "서점 구경"},
+      {"type": "ENTJ", "stars": 3, "text": "주말만큼은 리더 역할을 잠시 내려놓아요", "lucky": "낮잠"},
+      {"type": "ENTP", "stars": 4, "text": "즉흥 약속이 뜻밖의 즐거움을 안겨줘요", "lucky": "새로운 카페"}]},
+    {"code": "NF", "label": "외교관형", "types": [
+      {"type": "INFJ", "stars": 3, "text": "조용한 시간에 마음이 차분히 정리돼요", "lucky": "일기 쓰기"},
+      {"type": "INFP", "stars": 4, "text": "좋아하는 영화 한 편이 마음을 채워줘요", "lucky": "영화 감상"},
+      {"type": "ENFJ", "stars": 2, "text": "남을 챙기느라 지치지 않게 나를 먼저요", "lucky": "향초"},
+      {"type": "ENFP", "stars": 5, "text": "설레는 만남이 주말을 반짝이게 해줘요", "lucky": "스티커 사진"}]},
+    {"code": "SJ", "label": "관리자형", "types": [
+      {"type": "ISTJ", "stars": 4, "text": "정리정돈한 공간이 마음까지 개운하게 해요", "lucky": "빨래 개기"},
+      {"type": "ISFJ", "stars": 3, "text": "가족을 위한 작은 요리가 웃음을 불러요", "lucky": "홈베이킹"},
+      {"type": "ESTJ", "stars": 2, "text": "완벽한 주말보다 편안한 주말을 즐겨요", "lucky": "소파 휴식"},
+      {"type": "ESFJ", "stars": 4, "text": "모임에서 건넨 칭찬이 행운으로 돌아와요", "lucky": "귀여운 간식"}]},
+    {"code": "SP", "label": "탐험가형", "types": [
+      {"type": "ISTP", "stars": 3, "text": "혼자만의 취미 시간이 에너지를 채워줘요", "lucky": "레고"},
+      {"type": "ISFP", "stars": 4, "text": "늦가을 풍경을 사진에 담기 좋은 날이에요", "lucky": "낙엽 산책"},
+      {"type": "ESTP", "stars": 2, "text": "급한 결정은 하루만 미뤄두면 좋아요", "lucky": "스트레칭"},
+      {"type": "ESFP", "stars": 3, "text": "흥겨운 노래 한 곡에 하루가 즐거워져요", "lucky": "노래방"}]}
+  ],
+  "captions": {
+    "ddi": "11월 21일 토요일 🐭~🐷 띠별 운세\n👑 오늘의 1등은 토끼띠! 기다리던 소식이 찾아와요\n옆으로 넘겨 내 띠 운세를 확인해보세요 👉\n\n늦가을 주말, 내일은 첫눈을 기다리는 절기 소설이에요 🍂\n댓글에 띠를 남기면 한 줄 운세를 보내드려요 💬\n\n#오늘의운세 #띠별운세 #11월운세 #토요일운세 #주말운세 #사주 #운세 #띠운세 #토끼띠 #운세스타그램\n재미로 보는 운세예요 🙂",
+    "mbti": "11월 21일 토요일 🧠 MBTI 운세\n👑 오늘의 1등은 ENFP! 설레는 만남이 기다려요\n옆으로 넘겨 내 MBTI 운세를 확인해보세요 👉\n\n느긋한 주말, 나에게 맞는 쉼을 찾아봐요 🍂\n친구 MBTI도 태그해서 같이 봐요 💬\n\n#오늘의운세 #MBTI운세 #MBTI #11월운세 #토요일운세 #주말운세 #ENFP #운세 #MBTI스타그램 #사주\n재미로 보는 운세예요 🙂"
+  }
+}

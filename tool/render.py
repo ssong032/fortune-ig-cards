@@ -156,6 +156,19 @@ def find_browser(given):
             return c
     sys.exit("no Chrome/Edge/Chromium found")
 
+def has_blank_patch(png):
+    """Chrome sometimes captures before the page finishes painting, leaving pure-white
+    tiles. Backgrounds are gradients and never pure white, so white along the bottom or
+    right edge means a bad capture. Skipped if Pillow is not installed."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    im = Image.open(png).convert("RGB")
+    w, h = im.size
+    pts = [(x, y) for x in range(0, w, 8) for y in (h - 4, h - 40)] + [(w - 4, y) for y in range(0, h, 8)]
+    return any(im.getpixel(p) == (255, 255, 255) for p in pts)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data"); ap.add_argument("out"); ap.add_argument("--browser")
@@ -171,8 +184,12 @@ def main():
                 "--virtual-time-budget=5000", f"--screenshot={out / name}", hp.resolve().as_uri()]
         if os.name != "nt":
             args[1:1] = ["--no-sandbox", "--disable-dev-shm-usage"]
-        subprocess.run(args, check=True, capture_output=True, timeout=90)
-        if not (out / name).exists() or (out / name).stat().st_size < 20000:
+        for attempt in range(4):
+            subprocess.run(args, check=True, capture_output=True, timeout=90)
+            if (out / name).exists() and (out / name).stat().st_size > 20000 and not has_blank_patch(out / name):
+                break
+            print(f"retry {name} (attempt {attempt + 2})")
+        else:
             sys.exit(f"render failed for {name}")
         print("ok", name)
 
