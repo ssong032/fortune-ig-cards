@@ -305,6 +305,13 @@ export default {
       await putPost(env, "TEST", p);
       return new Response(sent.ok ? "test sent" : "send failed");
     }
+    if (url.pathname === "/notify" && url.searchParams.get("k") === env.WEBHOOK_SECRET) {
+      // Send the approval request for date d right now (as if it were 21:00 the night before).
+      const d = url.searchParams.get("d");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d || "")) return new Response("bad d", { status: 400 });
+      await maybeNotify(env, { ymd: addDays(d, -1), hour: NOTIFY_FROM_HOUR });
+      return new Response((await getPost(env, d)).msg_id ? "notified" : "no manifest / no owner");
+    }
     if (url.pathname === "/tick" && url.searchParams.get("k") === env.WEBHOOK_SECRET) { await tick(env); return new Response("tick done"); }
     return new Response("fortune-ig bot");
   },
