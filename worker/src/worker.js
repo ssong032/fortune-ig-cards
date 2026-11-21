@@ -289,6 +289,22 @@ export default {
       } catch (e) { ig = { ok: false, error: e.message }; }
       return Response.json({ webhook: hook, instagram: ig, owner_chat_set: !!(await owner(env)) });
     }
+    if (url.pathname === "/test" && url.searchParams.get("k") === env.WEBHOOK_SECRET) {
+      // Dry-run preview: real images + buttons, but under the key "TEST" which maybePublish never reads.
+      const chat = await owner(env);
+      if (!chat) return new Response("no owner yet");
+      const d = url.searchParams.get("d") || "2026-11-23";
+      const files = (pre, n) => Array.from({ length: n }, (_, i) => `${pre}_${String(i + 1).padStart(2, "0")}.png`);
+      for (const f of [files("ddi", 9), files("mbti", 7)]) {
+        await tg(env, "sendMediaGroup", { chat_id: chat, media: f.map((x) => ({ type: "photo", media: `${RAW}/images/${d}/${x}` })) });
+      }
+      await env.STATE.delete("post:TEST");
+      const p = { head: `🧪 테스트 알림 (${d} 카드)\n\n버튼을 눌러 보세요. 테스트라서 실제로 게시되지는 않아요.` };
+      const sent = await tg(env, "sendMessage", { chat_id: chat, text: `${p.head}\n\n${statusLine(p)}`, reply_markup: keyboard("TEST", p) });
+      p.msg_id = sent.result && sent.result.message_id;
+      await putPost(env, "TEST", p);
+      return new Response(sent.ok ? "test sent" : "send failed");
+    }
     if (url.pathname === "/tick" && url.searchParams.get("k") === env.WEBHOOK_SECRET) { await tick(env); return new Response("tick done"); }
     return new Response("fortune-ig bot");
   },
