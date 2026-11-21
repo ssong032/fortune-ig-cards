@@ -18,7 +18,7 @@ const GRAPH_VER = "v23.0";
 const igBase = (token) => (token.startsWith("IG") ? `https://graph.instagram.com/${GRAPH_VER}` : `https://graph.facebook.com/${GRAPH_VER}`);
 const KST = 9 * 3600 * 1000;
 const PUBLISH_HOUR = 6;
-const NOTIFY_FROM_HOUR = 21; // look for tomorrow's cards from 21:00 KST
+const NOTIFY_FROM_HOUR = 15; // look for tomorrow's cards from 15:00 KST (routine renders them at 14:30)
 const REMIND_HOUR = 23;
 const TOKEN_REFRESH_DAYS = 45;
 const PARTS = { ddi: "🐭 띠별", mbti: "🧠 MBTI" };
