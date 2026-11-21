@@ -3,6 +3,7 @@
 usage: python render.py data.json OUT_DIR [--browser PATH]
 """
 import argparse, json, os, shutil, subprocess, sys, html
+import datetime as dt
 from pathlib import Path
 
 W, H = 1080, 1350
@@ -237,12 +238,26 @@ def find_ffmpeg():
     except ImportError:
         sys.exit("ffmpeg not found: install it or `python3 -m pip install imageio-ffmpeg`")
 
-def make_reel(out, slides, bg, dest):
-    """9:16 silent slideshow for Reels (Instagram adds licensed music on top).
+MUSIC = Path(__file__).resolve().parent / "music"
+
+def pick_music(date_name, offset=0):
+    """One of the original tracks in tool/music (made by make_music.py), rotated by date."""
+    tracks = sorted(MUSIC.glob("bgm_*.m4a"))
+    if not tracks:
+        return None
+    try:
+        n = dt.date.fromisoformat(date_name).toordinal()
+    except ValueError:
+        n = 0
+    return tracks[(n + offset) % len(tracks)]
+
+def make_reel(out, slides, bg, dest, music=None):
+    """9:16 slideshow for Reels with an original background track baked in
+    (the Instagram API cannot attach songs from Instagram's music library).
     Each 1080x1350 card is scaled to 918x1148 and placed at y=230 so it stays inside the
     Reels safe zone (top 230px and bottom ~480px are covered by Instagram UI)."""
     ff = find_ffmpeg()
-    durs = [2.6] + [2.0] * (len(slides) - 2) + [2.4]
+    durs = [2.6] + [2.8] * (len(slides) - 2) + [2.6]
     inputs, chains = [], []
     for i, (s, dur) in enumerate(zip(slides, durs)):
         inputs += ["-loop", "1", "-t", f"{dur}", "-i", str(out / s)]
@@ -254,12 +269,19 @@ def make_reel(out, slides, bg, dest):
         xf.append(f"[{last}][v{i}]xfade=transition=fade:duration=0.3:offset={t:.2f}[x{i}]")
         last, t = f"x{i}", t + durs[i]
     graph = ";".join(chains + xf)
-    subprocess.run([ff, "-y", *inputs, "-filter_complex", graph, "-map", f"[{last}]", "-c:v", "libx264",
-                    "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                    "-r", "30", str(dest)], check=True, capture_output=True, timeout=300)
-    print("ok", dest.name, f"{t:.1f}s")
+    audio = []
+    if music:
+        ai = len(slides)
+        inputs += ["-i", str(music)]
+        graph += f";[{ai}:a]atrim=0:{t:.2f},afade=t=in:d=0.3,afade=t=out:st={max(0, t - 1.2):.2f}:d=1.2,volume=0.9[a]"
+        audio = ["-map", "[a]", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2"]
+    subprocess.run([ff, "-y", *inputs, "-filter_complex", graph, "-map", f"[{last}]", *audio, "-c:v", "libx264",
+                    "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high",
+                    "-movflags", "+faststart", "-r", "30", "-t", f"{t:.2f}", str(dest)],
+                   check=True, capture_output=True, timeout=300)
+    print("ok", dest.name, f"{t:.1f}s", music.name if music else "silent")
 
-def write_publish_files(out, d, names):
+def write_publish_files(out, d, names, reels=None):
     """The Instagram API only accepts JPEG, so write a JPEG next to each PNG, plus
     manifest.json, which the Telegram/Instagram worker reads to preview and publish."""
     from PIL import Image  # required here: no JPEGs means nothing can be published
@@ -275,14 +297,16 @@ def write_publish_files(out, d, names):
         "mbti": [j for j in jpgs if j.startswith("mbti_")],
         "captions": {"ddi": caps.get("ddi", ""), "mbti": caps.get("mbti", "")},
     }
+    if reels:  # {"ddi": "reel_ddi.mp4", "mbti": "reel_mbti.mp4"}; reels reuse the carousel captions
+        manifest["reels"] = reels
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
     print("ok manifest.json", len(jpgs), "jpg")
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data"); ap.add_argument("out"); ap.add_argument("--browser")
-    ap.add_argument("--reel", action="store_true", help="also build reel.mp4 (off by default)")
-    ap.add_argument("--no-reel", action="store_true", help="kept for compatibility; reels are off by default")
+    ap.add_argument("--reel", action="store_true", help="kept for compatibility; reels are on by default")
+    ap.add_argument("--no-reel", action="store_true", help="skip reel_ddi.mp4 / reel_mbti.mp4")
     a = ap.parse_args()
     d = json.load(open(a.data, encoding="utf-8"))
     out = Path(a.out).resolve(); (out / "html").mkdir(parents=True, exist_ok=True)
@@ -306,10 +330,13 @@ def main():
         else:
             sys.exit(f"render failed for {name}")
         print("ok", name)
-    write_publish_files(out, d, [n for n, _ in pages])
-    if a.reel and not a.no_reel:
-        ddi = [n for n, _ in pages if n.startswith("ddi_")]
-        make_reel(out, ddi, "0xF9E2D3", out / "reel.mp4")
+    reels = None
+    if not a.no_reel:
+        names = [n for n, _ in pages]
+        make_reel(out, [n for n in names if n.startswith("ddi_")], "0xF9E2D3", out / "reel_ddi.mp4", pick_music(out.name, 0))
+        make_reel(out, [n for n in names if n.startswith("mbti_")], "0xE6ECFB", out / "reel_mbti.mp4", pick_music(out.name, 3))
+        reels = {"ddi": "reel_ddi.mp4", "mbti": "reel_mbti.mp4"}
+    write_publish_files(out, d, [n for n, _ in pages], reels)
 
 if __name__ == "__main__":
     main()
