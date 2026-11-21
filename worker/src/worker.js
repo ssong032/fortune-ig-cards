@@ -11,7 +11,11 @@
 // KV binding: STATE
 
 const RAW = "https://raw.githubusercontent.com/ssong032/fortune-ig-cards/main";
-const IG = "https://graph.instagram.com/v23.0";
+// New Meta apps use "API setup with Unified login": a Business-portfolio *system user* token
+// (starts with "EAA", never expires) against graph.facebook.com. Older Instagram-Login tokens
+// ("IGAA…", 60-day, refreshable) use graph.instagram.com. Both are supported.
+const GRAPH_VER = "v23.0";
+const igBase = (token) => (token.startsWith("IG") ? `https://graph.instagram.com/${GRAPH_VER}` : `https://graph.facebook.com/${GRAPH_VER}`);
 const KST = 9 * 3600 * 1000;
 const PUBLISH_HOUR = 6;
 const NOTIFY_FROM_HOUR = 21; // look for tomorrow's cards from 21:00 KST
@@ -92,17 +96,27 @@ async function igCall(url, params, method = "POST") {
   return j;
 }
 async function igUserId(env, token) {
-  let id = await env.STATE.get("ig_user_id");
-  if (!id) {
+  let id = env.IG_USER_ID || (await env.STATE.get("ig_user_id"));
+  if (id) return id;
+  const IG = igBase(token);
+  if (token.startsWith("IG")) {
     const me = await igCall(`${IG}/me`, { fields: "user_id,username", access_token: token }, "GET");
     id = String(me.user_id || me.id);
-    await env.STATE.put("ig_user_id", id);
     await env.STATE.put("ig_username", me.username || "");
+  } else {
+    // System user token: find the Instagram professional account behind the assigned Page(s).
+    const pages = await igCall(`${IG}/me/accounts`, { fields: "name,instagram_business_account{id,username}", access_token: token }, "GET");
+    const hit = (pages.data || []).find((p) => p.instagram_business_account);
+    if (!hit) throw new Error("토큰에 연결된 페이지에서 인스타 비즈니스 계정을 찾지 못했어요 (시스템 사용자에 페이지와 인스타 계정을 할당했는지 확인)");
+    id = hit.instagram_business_account.id;
+    await env.STATE.put("ig_username", hit.instagram_business_account.username || "");
   }
+  await env.STATE.put("ig_user_id", id);
   return id;
 }
 async function publishCarousel(env, files, ymd, caption) {
   const token = await igToken(env);
+  const IG = igBase(token);
   const uid = await igUserId(env, token);
   const children = [];
   for (const f of files) {
@@ -123,6 +137,7 @@ async function publishCarousel(env, files, ymd, caption) {
 
 // ---------- cron ----------
 async function maybeRefreshToken(env) {
+  if (!(await igToken(env)).startsWith("IG")) return; // system user tokens never expire
   const ts = Number((await env.STATE.get("ig_token_ts")) || 0);
   if (!ts) { await env.STATE.put("ig_token_ts", String(Date.now())); return; }
   if (Date.now() - ts < TOKEN_REFRESH_DAYS * 86400e3) return;
@@ -252,7 +267,7 @@ export default {
         const token = await igToken(env);
         await env.STATE.delete("ig_user_id");
         const uid = await igUserId(env, token);
-        const lim = await igCall(`${IG}/${uid}/content_publishing_limit`, { fields: "quota_usage,config", access_token: token }, "GET");
+        const lim = await igCall(`${igBase(token)}/${uid}/content_publishing_limit`, { fields: "quota_usage,config", access_token: token }, "GET");
         if (!(await env.STATE.get("ig_token_ts"))) await env.STATE.put("ig_token_ts", String(Date.now()));
         ig = { ok: true, user_id: uid, username: await env.STATE.get("ig_username"), publishing_limit: lim.data };
       } catch (e) { ig = { ok: false, error: e.message }; }
