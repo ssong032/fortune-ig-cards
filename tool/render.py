@@ -6,8 +6,14 @@ import argparse, json, os, shutil, subprocess, sys, html
 from pathlib import Path
 
 W, H = 1080, 1350
-FONT = "'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif"
-EMOJI = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji'"
+# Bundled fonts (OFL) so Windows and the Linux cloud runner render identically.
+FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+FONT_FACES = (
+    f"@font-face{{font-family:'FKR';src:url('{(FONTS_DIR / 'NotoSansKR-VF.ttf').as_uri()}');font-weight:100 900}}"
+    f"@font-face{{font-family:'FEmoji';src:url('{(FONTS_DIR / 'NotoColorEmoji.ttf').as_uri()}')}}"
+)
+FONT = "'FKR','Noto Sans KR','Malgun Gothic',sans-serif,'FEmoji'"
+EMOJI = "'FEmoji','Noto Color Emoji','Segoe UI Emoji'"
 
 THEMES = {
     "zodiac": dict(bg="linear-gradient(165deg,#FFF7EA 0%,#FBE6D4 55%,#F6D6C8 100%)",
@@ -27,6 +33,7 @@ def stars(n, accent):
 def page(theme, body, idx, total, header):
     t = THEMES[theme]
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+{FONT_FACES}
 *{{margin:0;padding:0;box-sizing:border-box}}
 html,body{{width:{W}px;height:{H}px;overflow:hidden}}
 body{{background:{t['bg']};color:{t['ink']};font-family:{FONT};position:relative;
@@ -139,8 +146,11 @@ def build(d):
 def find_browser(given):
     cands = [given] if given else []
     cands += [r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-              r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-              shutil.which("chromium") or "", shutil.which("google-chrome") or "", shutil.which("chromium-browser") or ""]
+              r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
+    cands += [shutil.which(n) or "" for n in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable")]
+    # Playwright's downloaded Chromium (cloud runner)
+    pw = Path.home() / ".cache" / "ms-playwright"
+    cands += sorted((str(p) for p in pw.glob("chromium-*/chrome-linux*/chrome")), reverse=True)
     for c in cands:
         if c and os.path.exists(c):
             return c
@@ -156,10 +166,14 @@ def main():
     for name, doc in build(d):
         hp = out / "html" / name.replace(".png", ".html")
         hp.write_text(doc, encoding="utf-8")
-        subprocess.run([br, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
-                        "--force-device-scale-factor=1", f"--window-size={W},{H}",
-                        "--virtual-time-budget=3000", f"--screenshot={out / name}", hp.resolve().as_uri()],
-                       check=True, capture_output=True, timeout=60)
+        args = [br, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
+                "--allow-file-access-from-files", "--force-device-scale-factor=1", f"--window-size={W},{H}",
+                "--virtual-time-budget=5000", f"--screenshot={out / name}", hp.resolve().as_uri()]
+        if os.name != "nt":
+            args[1:1] = ["--no-sandbox", "--disable-dev-shm-usage"]
+        subprocess.run(args, check=True, capture_output=True, timeout=90)
+        if not (out / name).exists() or (out / name).stat().st_size < 20000:
+            sys.exit(f"render failed for {name}")
         print("ok", name)
 
 if __name__ == "__main__":
