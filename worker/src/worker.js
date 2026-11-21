@@ -459,6 +459,9 @@ export default {
       // Send the approval request for date d right now (as if it were 21:00 the night before).
       const d = url.searchParams.get("d");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d || "")) return new Response("bad d", { status: 400 });
+      if (url.searchParams.get("force") === "1") { // re-send a fresh message, keeping approvals already made
+        const old = await getPost(env, d); delete old.msg_id; delete old.reminded; await putPost(env, d, old);
+      }
       await maybeNotify(env, { ymd: addDays(d, -1), hour: NOTIFY_FROM_HOUR });
       return new Response((await getPost(env, d)).msg_id ? "notified" : "no manifest / no owner");
     }
