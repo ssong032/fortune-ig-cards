@@ -105,9 +105,25 @@ async function igUserId(env, token) {
     await env.STATE.put("ig_username", me.username || "");
   } else {
     // System user token: find the Instagram professional account behind the assigned Page(s).
-    const pages = await igCall(`${IG}/me/accounts`, { fields: "name,instagram_business_account{id,username}", access_token: token }, "GET");
-    const hit = (pages.data || []).find((p) => p.instagram_business_account);
-    if (!hit) throw new Error("토큰에 연결된 페이지에서 인스타 비즈니스 계정을 찾지 못했어요 (시스템 사용자에 페이지와 인스타 계정을 할당했는지 확인)");
+    let pages = { data: [] };
+    try { pages = await igCall(`${IG}/me/accounts`, { fields: "name,instagram_business_account{id,username}", access_token: token }, "GET"); } catch (e) { /* page token has no /me/accounts */ }
+    let hit = (pages.data || []).find((p) => p.instagram_business_account);
+    if (!hit) {
+      // Page access token: /me is the Page itself.
+      try {
+        const me = await igCall(`${IG}/me`, { fields: "name,instagram_business_account{id,username}", access_token: token }, "GET");
+        if (me.instagram_business_account) hit = me;
+      } catch (e) { /* not a page token */ }
+    }
+    if (!hit) {
+      let perms = "";
+      try {
+        const pr = await igCall(`${IG}/me/permissions`, { access_token: token }, "GET");
+        perms = (pr.data || []).filter((x) => x.status === "granted").map((x) => x.permission).join(",");
+      } catch (e) { perms = "? " + e.message; }
+      const seen = (pages.data || []).map((p) => `${p.name}${p.instagram_business_account ? "(IG)" : "(no IG)"}`).join(", ") || "none";
+      throw new Error(`no IG business account on token pages. pages=[${seen}] perms=[${perms}]`);
+    }
     id = hit.instagram_business_account.id;
     await env.STATE.put("ig_username", hit.instagram_business_account.username || "");
   }
