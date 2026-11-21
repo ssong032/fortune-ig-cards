@@ -21,7 +21,14 @@ const PUBLISH_HOUR = 6;
 const NOTIFY_FROM_HOUR = 15; // look for tomorrow's cards from 15:00 KST (routine renders them at 14:30)
 const REMIND_HOUR = 23;
 const TOKEN_REFRESH_DAYS = 45;
-const PARTS = { ddi: "🐭 띠별", mbti: "🧠 MBTI" };
+// Videos come through jsDelivr (same repo): raw.githubusercontent serves .mp4 as
+// application/octet-stream, which Instagram's video fetcher may reject; jsDelivr sends video/mp4.
+const CDN = "https://cdn.jsdelivr.net/gh/ssong032/fortune-ig-cards@main";
+const PARTS = { ddi: "🐭 띠별 카드", mbti: "🧠 MBTI 카드", reel_ddi: "🎬 띠별 릴스", reel_mbti: "🎬 MBTI 릴스" };
+const CARDS = ["ddi", "mbti"], REELS = ["reel_ddi", "reel_mbti"];
+const REEL_TIMEOUT_MIN = 40; // give up on a reel container that never finishes processing
+// Parts offered for a date: set from the manifest when notified; older posts had only the two carousels.
+const partsOf = (p) => p.parts || CARDS;
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
 
 // ---------- time helpers (all dates are KST calendar dates) ----------
@@ -54,23 +61,27 @@ async function manifest(ymd) {
 }
 
 function statusLine(p) {
-  return Object.keys(PARTS).map((k) => {
+  return partsOf(p).map((k) => {
     const s = p[k] || "대기";
-    const icon = { approved: "✅ 승인(6시 게시 예정)", publishing: "⏳ 게시 중", published: "🎉 게시 완료", skipped: "⏭️ 건너뜀", error: "❌ 오류" }[s] || "⬜ 승인 전";
+    const icon = { approved: "✅ 승인(6시 게시 예정)", publishing: "⏳ 게시 중", processing: "⏳ 영상 처리 중", published: "🎉 게시 완료", skipped: "⏭️ 건너뜀", error: "❌ 오류" }[s] || "⬜ 승인 전";
     return `${PARTS[k]}: ${icon}${p[k + "_link"] ? " " + p[k + "_link"] : ""}`;
   }).join("\n");
 }
 function keyboard(ymd, p) {
-  const anyApproved = Object.keys(PARTS).some((k) => p[k] === "approved");
-  const anyError = Object.keys(PARTS).some((k) => p[k] === "error");
-  const done = Object.keys(PARTS).every((k) => ["published", "skipped"].includes(p[k]));
+  const parts = partsOf(p);
+  const anyApproved = parts.some((k) => p[k] === "approved");
+  const anyError = parts.some((k) => p[k] === "error");
+  const done = parts.every((k) => ["published", "skipped"].includes(p[k]));
   if (done) return { inline_keyboard: [] };
   const rows = [];
-  if (!anyApproved) {
-    rows.push([{ text: "✅ 둘 다 6시에 게시", callback_data: `A:${ymd}:both` }]);
+  if (!anyApproved && !parts.some((k) => ["publishing", "processing", "published"].includes(p[k]))) {
+    const hasReels = parts.some((k) => REELS.includes(k));
+    rows.push([{ text: hasReels ? "✅ 전부 6시에 게시 (카드+릴스)" : "✅ 둘 다 6시에 게시", callback_data: `A:${ymd}:all` }]);
+    if (hasReels) rows.push([{ text: "🖼 카드뉴스만", callback_data: `A:${ymd}:cards` }, { text: "🎬 릴스만", callback_data: `A:${ymd}:reels` }]);
     rows.push([{ text: "🐭 띠별만", callback_data: `A:${ymd}:ddi` }, { text: "🧠 MBTI만", callback_data: `A:${ymd}:mbti` }]);
     rows.push([{ text: "⏭️ 이번엔 건너뛰기", callback_data: `S:${ymd}` }]);
-  } else {
+  } else if (anyApproved) {
+    if (parts.some((k) => !p[k])) rows.push([{ text: "➕ 새로 추가된 것도 승인", callback_data: `A:${ymd}:all` }]);
     rows.push([{ text: "↩️ 승인 취소", callback_data: `C:${ymd}` }]);
   }
   if (anyError) rows.push([{ text: "🔁 오류 난 것 다시 시도", callback_data: `R:${ymd}` }]);
@@ -150,6 +161,34 @@ async function publishCarousel(env, files, ymd, caption) {
   const m = await igCall(`${IG}/${pub.id}`, { fields: "permalink", access_token: token }, "GET");
   return m.permalink;
 }
+// Reels take a while to process, so they run across cron ticks:
+// tick 1 creates the container, later ticks poll status_code and publish once FINISHED.
+async function startReel(env, file, ymd, caption) {
+  const token = await igToken(env);
+  const uid = await igUserId(env, token);
+  const c = await igCall(`${igBase(token)}/${uid}/media`, {
+    media_type: "REELS", video_url: `${CDN}/images/${ymd}/${file}`, caption, share_to_feed: "true", access_token: token,
+  });
+  return c.id;
+}
+async function checkReel(env, cid) { // -> null while processing, permalink when published
+  const token = await igToken(env);
+  const IG = igBase(token);
+  const s = await igCall(`${IG}/${cid}`, { fields: "status_code,status", access_token: token }, "GET");
+  if (s.status_code === "ERROR" || s.status_code === "EXPIRED") throw new Error(`영상 처리 실패 (${s.status_code}${s.status ? ": " + s.status : ""})`);
+  if (s.status_code !== "FINISHED") return null;
+  const uid = await igUserId(env, token);
+  const pub = await igCall(`${IG}/${uid}/media_publish`, { creation_id: cid, access_token: token });
+  const m = await igCall(`${IG}/${pub.id}`, { fields: "permalink", access_token: token }, "GET");
+  return m.permalink;
+}
+function approveSet(which, parts) {
+  const pick = {
+    all: parts, both: CARDS, cards: CARDS, reels: REELS,
+    ddi: ["ddi", "reel_ddi"], mbti: ["mbti", "reel_mbti"],
+  }[which] || [];
+  return pick.filter((k) => parts.includes(k));
+}
 
 // ---------- cron ----------
 async function maybeRefreshToken(env) {
@@ -174,7 +213,7 @@ async function maybeNotify(env, now) {
   if (!target) return;
   const p = await getPost(env, target);
   if (p.msg_id) {
-    if (now.hour === REMIND_HOUR && !p.reminded && !Object.keys(PARTS).some((k) => p[k])) {
+    if (now.hour === REMIND_HOUR && !p.reminded && !partsOf(p).some((k) => p[k])) {
       p.reminded = true; await putPost(env, target, p);
       await say(env, `⏰ ${label(target)} 운세가 아직 승인 전이에요. 위 메시지에서 승인해 주세요.`, { reply_to_message_id: p.msg_id });
     }
@@ -184,12 +223,16 @@ async function maybeNotify(env, now) {
   if (!m) return;
   const chat = await owner(env);
   if (!chat) return;
-  for (const k of Object.keys(PARTS)) {
-    const media = m[k].slice(0, 10).map((f) => ({ type: "photo", media: `${RAW}/images/${target}/${f}` }));
+  for (const k of CARDS) {
+    const media = (m[k] || []).slice(0, 10).map((f) => ({ type: "photo", media: `${RAW}/images/${target}/${f}` }));
     if (media.length) await tg(env, "sendMediaGroup", { chat_id: chat, media });
   }
+  const reels = m.reels || {};
+  const vids = CARDS.filter((k) => reels[k]).map((k) => ({ type: "video", media: `${CDN}/images/${target}/${reels[k]}`, caption: PARTS["reel_" + k] }));
+  if (vids.length) await tg(env, "sendMediaGroup", { chat_id: chat, media: vids });
+  p.parts = [...CARDS, ...CARDS.filter((k) => reels[k]).map((k) => "reel_" + k)];
   const cap = (s) => s.split("\n").slice(0, 3).join("\n");
-  p.head = `📅 ${label(target)} 운세 준비 완료\n\n🐭 띠별 캡션\n${cap(m.captions.ddi)}\n\n🧠 MBTI 캡션\n${cap(m.captions.mbti)}\n\n승인하면 ${label(target)} 오전 6시에 인스타에 자동 게시돼요.`;
+  p.head = `📅 ${label(target)} 운세 준비 완료\n\n🐭 띠별 캡션\n${cap(m.captions.ddi)}\n\n🧠 MBTI 캡션\n${cap(m.captions.mbti)}\n\n${vids.length ? "릴스는 같은 캡션으로 올라가요. " : ""}승인하면 ${label(target)} 오전 6시에 인스타에 자동 게시돼요.`;
   const sent = await tg(env, "sendMessage", { chat_id: chat, text: `${p.head}\n\n${statusLine(p)}`, reply_markup: keyboard(target, p), disable_web_page_preview: true });
   p.msg_id = sent.result && sent.result.message_id;
   await putPost(env, target, p);
@@ -199,21 +242,43 @@ async function maybePublish(env, now) {
   if (now.hour < PUBLISH_HOUR) return;
   const ymd = now.ymd;
   const p = await getPost(env, ymd);
-  const part = Object.keys(PARTS).find((k) => p[k] === "approved"); // one part per tick keeps subrequests < 50
-  if (!part) return;
-  const m = await manifest(ymd);
-  if (!m) { p[part] = "error"; p[part + "_err"] = "manifest 없음"; await putPost(env, ymd, p); await refreshControl(env, ymd, p); return; }
-  p[part] = "publishing"; await putPost(env, ymd, p);
-  try {
-    const link = await publishCarousel(env, m[part], ymd, m.captions[part]);
-    p[part] = "published"; p[part + "_link"] = link;
+  const parts = partsOf(p);
+  const fail = async (part, e) => {
+    p[part] = "error"; p[part + "_err"] = e.message; delete p[part + "_cid"]; await putPost(env, ymd, p);
+    await say(env, `❌ ${PARTS[part]} 게시 실패: ${e.message}\n아래 메시지의 '다시 시도'를 누르면 5분 안에 다시 올려요.`, { reply_to_message_id: p.msg_id });
+    await refreshControl(env, ymd, p);
+  };
+  const done = async (part, link) => {
+    p[part] = "published"; p[part + "_link"] = link; delete p[part + "_cid"];
     await putPost(env, ymd, p);
     await say(env, `🎉 ${PARTS[part]} 운세 게시 완료!\n${link}`);
-  } catch (e) {
-    p[part] = "error"; p[part + "_err"] = e.message; await putPost(env, ymd, p);
-    await say(env, `❌ ${PARTS[part]} 게시 실패: ${e.message}\n아래 메시지의 '다시 시도'를 누르면 5분 안에 다시 올려요.`, { reply_to_message_id: p.msg_id });
+    await refreshControl(env, ymd, p);
+  };
+  // 1) Reels already uploaded: poll, publish when ready (cheap, a few subrequests each).
+  for (const part of parts.filter((k) => p[k] === "processing")) {
+    try {
+      const link = await checkReel(env, p[part + "_cid"]);
+      if (link) await done(part, link);
+      else if (Date.now() - (p[part + "_t"] || 0) > REEL_TIMEOUT_MIN * 60e3) await fail(part, new Error(`${REEL_TIMEOUT_MIN}분 넘게 영상 처리가 끝나지 않음`));
+    } catch (e) { await fail(part, e); }
   }
-  await refreshControl(env, ymd, p);
+  // 2) Start one approved part per tick (keeps subrequests < 50). Carousels first.
+  const part = parts.find((k) => p[k] === "approved");
+  if (!part) return;
+  const m = await manifest(ymd);
+  if (!m) return fail(part, new Error("manifest 없음"));
+  try {
+    if (REELS.includes(part)) {
+      const file = (m.reels || {})[part.slice(5)];
+      if (!file) throw new Error("릴스 파일 없음");
+      p[part + "_cid"] = await startReel(env, file, ymd, m.captions[part.slice(5)]);
+      p[part] = "processing"; p[part + "_t"] = Date.now();
+      await putPost(env, ymd, p); await refreshControl(env, ymd, p);
+    } else {
+      p[part] = "publishing"; await putPost(env, ymd, p);
+      await done(part, await publishCarousel(env, m[part], ymd, m.captions[part]));
+    }
+  } catch (e) { await fail(part, e); }
 }
 
 async function tick(env) {
@@ -249,18 +314,19 @@ async function onUpdate(env, u) {
   const p = await getPost(env, ymd);
   const now = kstNow();
   let note = "";
+  const parts = partsOf(p);
   if (op === "A") {
-    for (const k of which === "both" ? Object.keys(PARTS) : [which]) if (!p[k] || p[k] === "error") p[k] = "approved";
-    for (const k of Object.keys(PARTS)) if (!p[k]) p[k] = "skipped";
+    for (const k of approveSet(which, parts)) if (!p[k] || p[k] === "error") p[k] = "approved";
+    for (const k of parts) if (!p[k]) p[k] = "skipped";
     note = ymd === now.ymd && now.hour >= PUBLISH_HOUR ? "승인! 5분 안에 게시돼요" : "승인! 6시에 게시돼요";
   } else if (op === "S") {
-    for (const k of Object.keys(PARTS)) if (!p[k]) p[k] = "skipped";
+    for (const k of parts) if (!p[k]) p[k] = "skipped";
     note = "이번 회차는 건너뛸게요";
   } else if (op === "C") {
-    for (const k of Object.keys(PARTS)) if (["approved", "skipped"].includes(p[k])) delete p[k];
+    for (const k of parts) if (["approved", "skipped"].includes(p[k])) delete p[k];
     note = "승인을 취소했어요";
   } else if (op === "R") {
-    for (const k of Object.keys(PARTS)) if (p[k] === "error") p[k] = "approved";
+    for (const k of parts) if (p[k] === "error") p[k] = "approved";
     note = "5분 안에 다시 시도할게요";
   }
   await putPost(env, ymd, p);
@@ -311,6 +377,32 @@ export default {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d || "")) return new Response("bad d", { status: 400 });
       await maybeNotify(env, { ymd: addDays(d, -1), hour: NOTIFY_FROM_HOUR });
       return new Response((await getPost(env, d)).msg_id ? "notified" : "no manifest / no owner");
+    }
+    if (url.pathname === "/reelcheck" && url.searchParams.get("k") === env.WEBHOOK_SECRET) {
+      // Upload-only check: creates a REELS container (never published; it expires in 24h) and reports its status.
+      try {
+        const cid = await startReel(env, url.searchParams.get("f") || "reel_ddi.mp4", url.searchParams.get("d") || "", "test");
+        const token = await igToken(env);
+        let s = {};
+        for (let i = 0; i < 6; i++) {
+          await sleep(5000);
+          s = await igCall(`${igBase(token)}/${cid}`, { fields: "status_code,status", access_token: token }, "GET");
+          if (s.status_code !== "IN_PROGRESS") break;
+        }
+        return Response.json({ container: cid, status_code: s.status_code, status: s.status });
+      } catch (e) { return Response.json({ error: e.message }); }
+    }
+    if (url.pathname === "/reels" && url.searchParams.get("k") === env.WEBHOOK_SECRET) {
+      // Attach reels to a date whose approval message went out before its manifest had reels.
+      const d = url.searchParams.get("d") || "";
+      const p = await getPost(env, d), m = await manifest(d), chat = await owner(env);
+      if (!p.msg_id || !m || !m.reels || !chat) return new Response("nothing to attach");
+      const vids = CARDS.filter((k) => m.reels[k]).map((k) => ({ type: "video", media: `${CDN}/images/${d}/${m.reels[k]}`, caption: PARTS["reel_" + k] }));
+      await tg(env, "sendMediaGroup", { chat_id: chat, media: vids, reply_to_message_id: p.msg_id });
+      p.parts = [...CARDS, ...CARDS.filter((k) => m.reels[k]).map((k) => "reel_" + k)];
+      await putPost(env, d, p);
+      await refreshControl(env, d, p);
+      return new Response("reels attached");
     }
     if (url.pathname === "/tick" && url.searchParams.get("k") === env.WEBHOOK_SECRET) { await tick(env); return new Response("tick done"); }
     return new Response("fortune-ig bot");
