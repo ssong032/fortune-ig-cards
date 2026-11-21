@@ -259,6 +259,25 @@ def make_reel(out, slides, bg, dest):
                     "-r", "30", str(dest)], check=True, capture_output=True, timeout=300)
     print("ok", dest.name, f"{t:.1f}s")
 
+def write_publish_files(out, d, names):
+    """The Instagram API only accepts JPEG, so write a JPEG next to each PNG, plus
+    manifest.json, which the Telegram/Instagram worker reads to preview and publish."""
+    from PIL import Image  # required here: no JPEGs means nothing can be published
+    jpgs = []
+    for n in names:
+        j = n.replace(".png", ".jpg")
+        Image.open(out / n).convert("RGB").save(out / j, "JPEG", quality=92, optimize=True, progressive=False)
+        jpgs.append(j)
+    caps = d.get("captions", {})
+    manifest = {
+        "date": out.name,
+        "ddi": [j for j in jpgs if j.startswith("ddi_")],
+        "mbti": [j for j in jpgs if j.startswith("mbti_")],
+        "captions": {"ddi": caps.get("ddi", ""), "mbti": caps.get("mbti", "")},
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("ok manifest.json", len(jpgs), "jpg")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data"); ap.add_argument("out"); ap.add_argument("--browser")
@@ -267,7 +286,7 @@ def main():
     a = ap.parse_args()
     d = json.load(open(a.data, encoding="utf-8"))
     out = Path(a.out).resolve(); (out / "html").mkdir(parents=True, exist_ok=True)
-    for old in list(out.glob("ddi_*.png")) + list(out.glob("mbti_*.png")):
+    for old in [*out.glob("ddi_*.png"), *out.glob("mbti_*.png"), *out.glob("ddi_*.jpg"), *out.glob("mbti_*.jpg")]:
         old.unlink()  # slide count can change between runs
     br = find_browser(a.browser)
     pages = build(d)
@@ -287,6 +306,7 @@ def main():
         else:
             sys.exit(f"render failed for {name}")
         print("ok", name)
+    write_publish_files(out, d, [n for n, _ in pages])
     if a.reel and not a.no_reel:
         ddi = [n for n, _ in pages if n.startswith("ddi_")]
         make_reel(out, ddi, "0xF9E2D3", out / "reel.mp4")
