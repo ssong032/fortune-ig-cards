@@ -262,7 +262,8 @@ def make_reel(out, slides, bg, dest):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data"); ap.add_argument("out"); ap.add_argument("--browser")
-    ap.add_argument("--no-reel", action="store_true")
+    ap.add_argument("--reel", action="store_true", help="also build reel.mp4 (off by default)")
+    ap.add_argument("--no-reel", action="store_true", help="kept for compatibility; reels are off by default")
     a = ap.parse_args()
     d = json.load(open(a.data, encoding="utf-8"))
     out = Path(a.out).resolve(); (out / "html").mkdir(parents=True, exist_ok=True)
@@ -286,7 +287,7 @@ def main():
         else:
             sys.exit(f"render failed for {name}")
         print("ok", name)
-    if not a.no_reel:
+    if a.reel and not a.no_reel:
         ddi = [n for n, _ in pages if n.startswith("ddi_")]
         make_reel(out, ddi, "0xF9E2D3", out / "reel.mp4")
 
