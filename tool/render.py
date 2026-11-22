@@ -281,6 +281,35 @@ def make_reel(out, slides, bg, dest, music=None):
                    check=True, capture_output=True, timeout=300)
     print("ok", dest.name, f"{t:.1f}s", music.name if music else "silent")
 
+# Line that points readers to the 찰떡궁합 site (https://ssong032.github.io/gunghap/, linked in the IG profile).
+# Rotated by date so the caption doesn't repeat word for word every day.
+SITE_LINES = {
+    "ddi": ["🔮 내 생년월일로 보는 오늘의 사주는 프로필 링크에서 (무료)",
+            "🔮 띠 말고 '내 사주'로 보는 오늘 운세 → 프로필 링크",
+            "🔮 생년월일만 넣으면 나만의 오늘 사주 풀이 → 프로필 링크"],
+    "mbti": ["💞 MBTI·띠 궁합 점수는 프로필 링크에서 (무료)",
+             "💞 그 사람이랑 나, 궁합 몇 점? → 프로필 링크",
+             "💞 MBTI 궁합부터 오늘의 사주까지 → 프로필 링크"],
+}
+
+def add_site_line(cap, kind, date_name):
+    """Insert the site line after the 📌 save line (or just before the hashtags)."""
+    if not cap or "프로필 링크" in cap:
+        return cap
+    try:
+        n = dt.date.fromisoformat(date_name).toordinal()
+    except ValueError:
+        n = 0
+    line = SITE_LINES[kind][n % len(SITE_LINES[kind])]
+    lines = cap.split("\n")
+    at = next((i + 1 for i, l in enumerate(lines) if l.startswith("📌")), None)
+    if at is None:
+        at = next((i for i, l in enumerate(lines) if l.lstrip().startswith("#")), len(lines))
+        while at > 0 and not lines[at - 1].strip():
+            at -= 1  # keep the blank line in front of the hashtags
+    lines.insert(at, line)
+    return "\n".join(lines)
+
 def write_publish_files(out, d, names, reels=None):
     """The Instagram API only accepts JPEG, so write a JPEG next to each PNG, plus
     manifest.json, which the Telegram/Instagram worker reads to preview and publish."""
@@ -295,7 +324,7 @@ def write_publish_files(out, d, names, reels=None):
         "date": out.name,
         "ddi": [j for j in jpgs if j.startswith("ddi_")],
         "mbti": [j for j in jpgs if j.startswith("mbti_")],
-        "captions": {"ddi": caps.get("ddi", ""), "mbti": caps.get("mbti", "")},
+        "captions": {k: add_site_line(caps.get(k, ""), k, out.name) for k in ("ddi", "mbti")},
     }
     if reels:  # {"ddi": "reel_ddi.mp4", "mbti": "reel_mbti.mp4"}; reels reuse the carousel captions
         manifest["reels"] = reels
