@@ -137,7 +137,8 @@ def chem_page(title, pairs, t):
         for i, (m, p) in enumerate(zip(("💞", "💕", "💗"), pairs), 1))
     head = f'<div style="font-size:58px;font-weight:900;text-align:center;margin-bottom:8px">{title}</div>'
     tail = (f'<div style="font-size:34px;font-weight:700;text-align:center;color:{t["sub"]}">'
-            f'📩 궁합 좋은 친구에게 보내주세요</div>')
+            f'📩 궁합 좋은 친구에게 보내주세요<br>'
+            f'<span style="color:{t["accent"]}">💞 우리 둘 궁합 점수는 프로필 링크에서</span></div>')
     return f'<div class="wrap" style="gap:30px">{head}{cards}{tail}</div>'
 
 def outro(t, lines):
@@ -148,6 +149,7 @@ def outro(t, lines):
         <div style="background:{t['card']};padding:22px 40px;border-radius:999px">📩 친구에게 보내서 운세 비교하기</div>
         <div style="background:{t['card']};padding:22px 40px;border-radius:999px">📌 저장하고 하루 3번 꺼내보기</div>
         <div style="background:{t['ink']};color:#fff;padding:22px 40px;border-radius:999px">🔔 팔로우하면 매일 아침 6시 업데이트</div>
+        <div style="background:{t['accent']};color:#fff;padding:22px 40px;border-radius:999px">🔮 프로필 링크에서 내 사주·궁합 보기</div>
       </div>""")
 
 def build(d):
