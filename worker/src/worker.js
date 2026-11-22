@@ -66,6 +66,82 @@ async function manifest(ymd) {
   return r.ok ? r.json() : null;
 }
 
+// ---------- 부서 보고서 (brief/D.json · D.md · D_qa.md) ----------
+async function rawText(path) {
+  const r = await fetch(`${RAW}/${path}?t=${Date.now()}`, { cf: { cacheTtl: 0 } });
+  return r.ok ? r.text() : null;
+}
+const CTA_KO = { save: "저장", share: "공유(DM)", follow: "팔로우", link: "프로필 링크" };
+const isYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || "") && !isNaN(new Date(v + "T00:00:00Z"));
+const clip = (v, n = 60) => (typeof v === "string" && v.trim() ? (v.length > n ? v.slice(0, n) + "…" : v.trim()) : "");
+// 검수표의 최종 판정: "ok" | "hold" | "unknown". 못 읽으면 절대 "ok" 로 보지 않는다.
+function qaVerdict(qa) {
+  const lines = qa.replace(/\r/g, "").split("\n");
+  const idx = lines.findIndex((l) => /게시\s*가능\s*여부|최종\s*판정/.test(l));
+  if (idx < 0) return "unknown";
+  const clean = (l) => l.replace(/\(?\s*가능\s*\/\s*보류\s*\)?/g, " ").replace(/게시\s*가능\s*여부/g, " ").replace(/최종\s*판정/g, " ");
+  for (const l of lines.slice(idx, idx + 3)) { // 판정 줄과 그 아래 2줄(제목 아래에 판정을 쓰는 경우)
+    const m = clean(l).match(/(보류|불가|수정\s*후|조건부|\bhold\b|reject)|((?<!불)가능|\bpass\b|\bok\b)/i);
+    if (m) return m[1] ? "hold" : "ok";
+  }
+  return "unknown";
+}
+function qaScore(qa) {
+  const src = qa.split("\n").find((l) => /품질/.test(l) && /\d/.test(l)) || qa;
+  const m = src.match(/(\d{1,3})\s*\/\s*100/) || src.match(/(\d{1,3})\s*점(?!\s*만점)/);
+  return m && +m[1] <= 100 ? m[1] : null;
+}
+async function briefSummary(ymd) {
+  const lines = [];
+  let b = null;
+  try { const t = await rawText(`brief/${ymd}.json`); b = t ? JSON.parse(t) : null; } catch (e) { b = null; }
+  const mk = b && b.marketing && typeof b.marketing === "object" ? b.marketing : null;
+  if (mk) {
+    lines.push("📋 이번 기획 (조사·분석부 · 마케팅부)");
+    if (clip(mk.theme)) lines.push(`🎯 테마: ${clip(mk.theme)}`);
+    const h = mk.hook && typeof mk.hook === "object" ? mk.hook : {};
+    if (clip(h.ddi, 30) || clip(h.mbti, 30)) lines.push(`🪝 후킹: 띠별 「${clip(h.ddi, 30) || "-"}」 · MBTI 「${clip(h.mbti, 30) || "-"}」`);
+    const c = typeof mk.cta_focus === "string" ? mk.cta_focus.trim().split(/[\s(:,]/)[0].toLowerCase() : "";
+    if (CTA_KO[c]) lines.push(`📣 강조: ${CTA_KO[c]}`);
+  } else {
+    lines.push("📋 이번에는 마케팅 브리프 없이 제작됐어요");
+  }
+  const qa = (await rawText(`brief/${ymd}_qa.md`)) || "";
+  if (!qa.trim()) {
+    lines.push("🔍 검수표가 아직 없어요 (보고서에서 확인)");
+  } else {
+    const v = qaVerdict(qa), sc = qaScore(qa);
+    const vt = { ok: "게시 가능", hold: "⚠️ 검수 보류", unknown: "판정 확인 필요" }[v];
+    lines.push(`🔍 검수 (검증·품질관리부): ${sc ? `품질 ${sc}점` : "점수 확인 필요"} · ${vt}`);
+  }
+  return lines.join("\n");
+}
+// 텔레그램 한 메시지 한도(4096자) 안에서, 줄바꿈 기준으로 자르고 이모지(서로게이트 쌍)가 갈라지지 않게 한다
+function chunks(text, size = 3500) {
+  const out = [];
+  let rest = text;
+  while (rest.length > size) {
+    let cut = rest.lastIndexOf("\n", size);
+    if (cut < size / 2) { cut = size; const c = rest.charCodeAt(cut - 1); if (c >= 0xd800 && c <= 0xdbff) cut -= 1; }
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\n/, "");
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+async function sendReport(env, ymd) {
+  if (!isYmd(ymd)) return say(env, "보고서는 날짜가 있는 운세 회차에만 있어요. 예: /report 2026-11-24");
+  const parts = [["📊 조사·분석부 · 마케팅부 보고", await rawText(`brief/${ymd}.md`)], ["🔍 검증·품질관리부 검수표", await rawText(`brief/${ymd}_qa.md`)]];
+  if (!parts.some(([, t]) => t && t.trim())) return say(env, `${label(ymd)} 보고서가 아직 없어요. (브리프는 전날 13:30, 검수표는 전날 14:30 이후에 만들어져요)`);
+  for (const [title, text] of parts) {
+    if (!text || !text.trim()) { await say(env, `${title} · ${label(ymd)}\n(아직 없음)`); continue; }
+    const cs = chunks(text.replace(/\r/g, ""));
+    for (let n = 0; n < cs.length; n++) {
+      await say(env, `${n ? `(${n + 1}/${cs.length}) ` : `${title} · ${label(ymd)}${cs.length > 1 ? ` (1/${cs.length})` : ""}\n\n`}${cs[n]}`);
+    }
+  }
+}
+
 function statusLine(p) {
   return partsOf(p).map((k) => {
     const s = p[k] || "대기";
@@ -78,7 +154,8 @@ function keyboard(ymd, p) {
   const anyApproved = parts.some((k) => p[k] === "approved");
   const anyError = parts.some((k) => p[k] === "error");
   const done = parts.every((k) => ["published", "skipped"].includes(p[k]));
-  if (done) return { inline_keyboard: [] };
+  const reportRow = [{ text: "📊 부서 보고서 보기", callback_data: `B:${ymd}` }];
+  if (done) return { inline_keyboard: [reportRow] };
   const rows = [];
   if (!anyApproved && !parts.some((k) => ["publishing", "processing", "published"].includes(p[k]))) {
     const hasReels = parts.some((k) => REELS.includes(k));
@@ -91,6 +168,7 @@ function keyboard(ymd, p) {
     rows.push([{ text: "↩️ 승인 취소", callback_data: `C:${ymd}` }]);
   }
   if (anyError) rows.push([{ text: "🔁 오류 난 것 다시 시도", callback_data: `R:${ymd}` }]);
+  rows.push(reportRow);
   return { inline_keyboard: rows };
 }
 async function refreshControl(env, ymd, p) {
@@ -303,6 +381,7 @@ async function maybeNotify(env, now) {
   p.parts = await partsFor(env, m);
   const cap = (s) => s.split("\n").slice(0, 3).join("\n");
   p.head = `📅 ${label(target)} 운세 준비 완료\n\n🐭 띠별 캡션\n${cap(m.captions.ddi)}\n\n🧠 MBTI 캡션\n${cap(m.captions.mbti)}\n\n${vids.length ? "릴스는 같은 캡션으로 올라가요. " : ""}승인하면 ${label(target)} 오전 6시에 인스타에 자동 게시돼요.`;
+  try { const sum = await briefSummary(target); if (sum && (p.head.length + sum.length) < 3500) p.head += `\n\n${sum}`; } catch (e) { console.log("brief summary error", e.stack); }
   const sent = await tg(env, "sendMessage", { chat_id: chat, text: `${p.head}\n\n${statusLine(p)}`, reply_markup: keyboard(target, p), disable_web_page_preview: true });
   p.msg_id = sent.result && sent.result.message_id;
   await putPost(env, target, p);
@@ -370,9 +449,15 @@ async function onUpdate(env, u) {
     if (text.startsWith("/start")) {
       if (!chatOwner) { await env.STATE.put("owner_chat", chat); return tg(env, "sendMessage", { chat_id: chat, text: "✅ 연결 완료! 매일 밤 다음 날 운세가 준비되면 여기로 승인 요청을 보낼게요." }); }
       if (chatOwner !== chat) return; // ignore strangers
-      return tg(env, "sendMessage", { chat_id: chat, text: "이미 연결돼 있어요. /status 로 상태를 볼 수 있어요." });
+      return tg(env, "sendMessage", { chat_id: chat, text: "이미 연결돼 있어요. /status 로 상태를, /report 로 부서 보고서를 볼 수 있어요." });
     }
     if (chatOwner !== chat) return;
+    if (/^\/report(\s|$)/.test(text)) {
+      const arg = text.split(/\s+/)[1];
+      const now = kstNow();
+      const ymd = isYmd(arg) ? arg : now.hour >= NOTIFY_FROM_HOUR ? addDays(now.ymd, 1) : now.ymd;
+      return sendReport(env, ymd);
+    }
     if (text.startsWith("/status")) {
       const now = kstNow(), ts = Number((await env.STATE.get("ig_token_ts")) || 0);
       const days = ts ? Math.floor((Date.now() - ts) / 86400e3) : "?";
@@ -385,6 +470,11 @@ async function onUpdate(env, u) {
   const q = u.callback_query;
   if (!q || String(q.message.chat.id) !== chatOwner) return;
   const [op, ymd, which] = q.data.split(":");
+  if (op === "B") {
+    if (!isYmd(ymd)) return tg(env, "answerCallbackQuery", { callback_query_id: q.id, text: "이 메시지에는 보고서가 없어요" });
+    await tg(env, "answerCallbackQuery", { callback_query_id: q.id, text: "보고서를 보내 드릴게요" });
+    return sendReport(env, ymd);
+  }
   const p = await getPost(env, ymd);
   const now = kstNow();
   let note = "";
