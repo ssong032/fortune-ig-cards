@@ -128,6 +128,22 @@ def check(path):
                 errs.append(f"{key}: {p['a']}×{p['b']}는 사이트 {fmt} 궁합 {s}점이에요. {need}점 이상인 쌍만 써야 해요.")
         if scores != sorted(scores, reverse=True):
             errs.append(f"{key}: 사이트 점수 높은 순으로 놓아 주세요 (지금 {scores}).")
+    hook = d.get("hook")
+    if hook is not None:
+        if not isinstance(hook, dict):
+            errs.append("hook 은 {\"ddi\": \"…\", \"mbti\": \"…\"} 형식이어야 해요.")
+        else:
+            for k in ("ddi", "mbti"):
+                v = hook.get(k)
+                if v is None:
+                    continue
+                if not isinstance(v, str):
+                    errs.append(f"hook.{k} 는 문자열이어야 해요.")
+                    continue
+                if len(v.strip()) > 20:
+                    errs.append(f"hook.{k} 가 {len(v.strip())}자예요. 20자 이내로 줄여 주세요.")
+                if any(len(w) > 12 for w in v.split()):
+                    errs.append(f"hook.{k} 에 띄어쓰기 없이 12자가 넘는 덩어리가 있어요. 화면에서 잘릴 수 있으니 띄어 써 주세요.")
     if errs:
         print("FAIL " + path)
         print("\n".join("- " + e for e in errs))

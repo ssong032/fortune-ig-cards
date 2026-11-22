@@ -231,15 +231,16 @@ def build(d):
 
     out = []
     # 릴스 첫 화면(후킹): data["hook"] = {"ddi": "...", "mbti": "..."} (마케팅부 브리프에서 옴). 캐러셀에는 안 들어가고 릴스 맨 앞에만 붙는다.
-    hooks = d.get("hook") or {}
+    hooks = d.get("hook") if isinstance(d.get("hook"), dict) else {}  # 형식이 틀리면 후킹 화면 없이 진행
     for key, th, t, label in (("ddi", "zodiac", tz, "띠별 운세"), ("mbti", "mbti", tm, "MBTI 운세")):
-        text = (hooks.get(key) or "").strip()
+        text = hooks.get(key)
+        text = text.strip() if isinstance(text, str) else ""
         if not text:
             continue
         sub = "끝까지 보면 내 순위가 나와요 👇" if key == "ddi" else "끝까지 보면 내 MBTI 순위 공개 👇"
         body = center(f"""
       <div class="e" style="font-size:150px;line-height:1">{'🔮' if key == 'ddi' else '🧠'}</div>
-      <div style="font-size:84px;font-weight:900;line-height:1.25;color:{t['ink']}">{esc(text)}</div>
+      <div style="font-size:84px;font-weight:900;line-height:1.25;color:{t['ink']};overflow-wrap:anywhere;max-width:100%">{esc(text)}</div>
       <div style="font-size:40px;font-weight:700;background:{t['accent']};color:#fff;padding:20px 44px;border-radius:999px">{sub}</div>""")
         out.append((f"hook_{key}.png", page(th, body, "", "", f"{d['date_short']} · {label}")))
     for n, (th, body, head) in enumerate(pages, 1):
