@@ -103,8 +103,11 @@ def check(path):
     fives = [z["name"] for z in zs if z["stars"] == 5]
     if len(fives) != 1:
         errs.append(f"5★ 띠는 정확히 1개여야 해요: {fives}")
-    order = sorted(range(12), key=lambda i: (-zs[i]["stars"], i))  # render.py ranks()와 같은 순위
-    top3 = set(order[:3])
+    # render.py ranks()와 같은 순위: 모든 항목에 rank가 있으면 그것, 없으면 별점 높은 순(같으면 띠 순서)
+    if all("rank" in z for z in zs):
+        top3 = {i for i, z in enumerate(zs) if z["rank"] <= 3}
+    else:
+        top3 = set(sorted(range(12), key=lambda i: (-zs[i]["stars"], i))[:3])
     for i, z in enumerate(zs):
         r = relation(tti_index(z["name"]), b)
         t = tier(r)
