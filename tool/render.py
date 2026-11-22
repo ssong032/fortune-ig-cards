@@ -152,9 +152,20 @@ def outro(t, lines):
         <div style="background:{t['accent']};color:#fff;padding:22px 40px;border-radius:999px">🔮 프로필 링크에서 내 사주·궁합 보기</div>
       </div>""")
 
+def iljin_line(d):
+    """Cover line like '신축(辛丑)일 · 하얀 소의 날', from date_label ('2026년 11월 23일 월요일'). Same formula as the site."""
+    import re
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from iljin import label
+    m = re.match(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", d.get("date_label", ""))
+    return label(dt.date(*map(int, m.groups()))) if m else ""
+
 def build(d):
     pages = []
     tz, tm = THEMES["zodiac"], THEMES["mbti"]
+    ij = iljin_line(d)
+    ij_html = lambda t: (f'<div style="font-size:34px;font-weight:700;color:{t["accent"]};background:{t["card"]};'
+                         f'padding:10px 30px;border-radius:999px">🗓 {esc(ij)}</div>') if ij else ""
     zs = d["zodiac"]
     zr = ranks(zs)
     top3 = sorted(range(12), key=lambda i: zr[i])[:3]
@@ -163,6 +174,7 @@ def build(d):
       <div style="font-size:34px;font-weight:700;color:{tz['accent']};letter-spacing:.2em">DAILY FORTUNE</div>
       <div style="font-size:104px;font-weight:900;line-height:1.12">오늘의<br>띠별 운세</div>
       <div style="font-size:42px;font-weight:600">{esc(d['date_label'])}</div>
+      {ij_html(tz)}
       <div style="font-size:34px;color:{tz['sub']}">{esc(d['season_line'])}</div>
       {podium([(zs[i]['name'], zs[i]['emoji']) for i in top3], tz)}
       <div style="font-size:36px;font-weight:700;background:{tz['ink']};color:#fff;padding:20px 44px;border-radius:999px;margin-top:6px">
