@@ -145,7 +145,7 @@ async function sendReport(env, ymd) {
 function statusLine(p) {
   return partsOf(p).map((k) => {
     const s = p[k] || "대기";
-    const icon = { approved: "✅ 승인(6시 게시 예정)", publishing: "⏳ 게시 중", processing: "⏳ 영상 처리 중", published: "🎉 게시 완료", skipped: "⏭️ 건너뜀", error: "❌ 오류" }[s] || "⬜ 승인 전";
+    const icon = { approved: "✅ 승인(6시 게시 예정)", publishing: "⏳ 게시 중", processing: "⏳ 처리 중", published: "🎉 게시 완료", skipped: "⏭️ 건너뜀", error: "❌ 오류" }[s] || "⬜ 승인 전";
     return `${PARTS[k]}: ${icon}${p[k + "_link"] ? " " + p[k + "_link"] : ""}`;
   }).join("\n");
 }
@@ -187,7 +187,10 @@ async function igCall(url, params, method = "POST") {
   const body = new URLSearchParams(params);
   const r = method === "POST" ? await fetch(url, { method, body }) : await fetch(`${url}?${body}`);
   const j = await r.json();
-  if (j.error) throw new Error(`${j.error.message || "IG error"} (${j.error.code || r.status})`);
+  if (j.error) {
+    const e = j.error, extra = [e.error_user_title, e.error_user_msg].filter(Boolean).join(": ");
+    throw new Error(`${e.message || "IG error"} (${e.code || r.status}${e.error_subcode ? "/" + e.error_subcode : ""})${extra ? " - " + extra : ""}`);
+  }
   return j;
 }
 async function igUserId(env, token) {
@@ -300,6 +303,40 @@ async function thWait(cid, token) {
     await sleep(3000);
   }
 }
+// 1단계: 사진(캐러셀 아이템) 컨테이너만 만든다. 처리가 끝나기 전에 캐러셀로 묶으면 "Invalid parameter" 가 나기 때문.
+async function startThreads(env, files, ymd) {
+  const token = await thToken(env);
+  if (!token) throw new Error("쓰레드 토큰 없음");
+  const uid = await thUserId(env, token);
+  const kids = [];
+  for (const f of files.slice(0, 20)) {
+    try {
+      const c = await igCall(`${TH}/${uid}/threads`, { media_type: "IMAGE", image_url: `${RAW}/images/${ymd}/${f}`, is_carousel_item: "true", access_token: token });
+      kids.push(c.id);
+    } catch (e) { throw new Error(`쓰레드 사진 등록(${f}) 실패: ${e.message}`); }
+  }
+  return kids.join(",");
+}
+// 2단계: 사진이 모두 FINISHED 면 캐러셀을 만들어 게시하고 링크를 돌려준다. 아직 처리 중이면 null.
+async function finishThreads(env, kids, caption) {
+  const token = await thToken(env);
+  const uid = await thUserId(env, token);
+  for (const id of kids.split(",")) {
+    const s = await igCall(`${TH}/${id}`, { fields: "status,error_message", access_token: token }, "GET");
+    if (s.status === "ERROR" || s.status === "EXPIRED") throw new Error(`쓰레드 사진 처리 실패 (${s.error_message || s.status})`);
+    if (s.status !== "FINISHED") return null;
+  }
+  let car;
+  try { car = await igCall(`${TH}/${uid}/threads`, { media_type: "CAROUSEL", children: kids, text: threadsText(caption), access_token: token }); }
+  catch (e) { throw new Error(`쓰레드 캐러셀 만들기 실패: ${e.message}`); }
+  await thWait(car.id, token);
+  let pub;
+  try { pub = await igCall(`${TH}/${uid}/threads_publish`, { creation_id: car.id, access_token: token }); }
+  catch (e) { throw new Error(`쓰레드 게시 실패: ${e.message}`); }
+  // 게시는 이미 됐으므로 링크 조회만 실패해도 오류로 두지 않는다(재시도하면 중복 게시됨)
+  try { const m = await igCall(`${TH}/${pub.id}`, { fields: "permalink", access_token: token }, "GET"); return m.permalink || "(링크 확인 실패 · 게시는 완료)"; }
+  catch (e) { return "(링크 확인 실패 · 게시는 완료)"; }
+}
 async function publishThreads(env, files, ymd, caption) {
   const token = await thToken(env);
   if (!token) throw new Error("쓰레드 토큰 없음");
@@ -393,28 +430,42 @@ async function maybePublish(env, now) {
   const p = await getPost(env, ymd);
   const parts = partsOf(p);
   const fail = async (part, e) => {
-    p[part] = "error"; p[part + "_err"] = e.message; delete p[part + "_cid"]; await putPost(env, ymd, p);
+    p[part] = "error"; p[part + "_err"] = e.message; delete p[part + "_cid"]; delete p[part + "_kids"]; await putPost(env, ymd, p);
     await say(env, `❌ ${PARTS[part]} 게시 실패: ${e.message}\n아래 메시지의 '다시 시도'를 누르면 5분 안에 다시 올려요.`, { reply_to_message_id: p.msg_id });
     await refreshControl(env, ymd, p);
   };
   const done = async (part, link) => {
-    p[part] = "published"; p[part + "_link"] = link; delete p[part + "_cid"];
+    p[part] = "published"; p[part + "_link"] = link; delete p[part + "_cid"]; delete p[part + "_kids"];
     await putPost(env, ymd, p);
     await say(env, `🎉 ${PARTS[part]} 운세 게시 완료!\n${link}`);
     await refreshControl(env, ymd, p);
   };
-  // 1) Reels already uploaded: poll, publish when ready (cheap, a few subrequests each).
+  // 1) Reels / Threads already uploaded: poll, publish when ready.
+  let threadsDone = false, heavy = false, mf = null;
   for (const part of parts.filter((k) => p[k] === "processing")) {
     try {
+      if (THREADS.includes(part)) {
+        if (threadsDone) continue; // 한 tick 에 Threads 하나만 마무리 (서브요청 50개 한도)
+        threadsDone = true;
+        if (!p[part + "_kids"]) throw new Error("쓰레드 사진 목록 없음 (다시 시도를 눌러 주세요)");
+        mf = mf || (await manifest(ymd));
+        if (!mf) continue; // manifest 를 잠시 못 받으면 다음 tick 에 다시
+        const link = await finishThreads(env, p[part + "_kids"], mf.captions[part.slice(3)]);
+        if (link) { heavy = true; await done(part, link); }
+        else if (Date.now() - (p[part + "_t"] || 0) > REEL_TIMEOUT_MIN * 60e3) await fail(part, new Error(`${REEL_TIMEOUT_MIN}분 넘게 쓰레드 사진 처리가 끝나지 않음`));
+        continue;
+      }
       const link = await checkReel(env, p[part + "_cid"]);
-      if (link) await done(part, link);
+      if (link) { heavy = true; await done(part, link); }
       else if (Date.now() - (p[part + "_t"] || 0) > REEL_TIMEOUT_MIN * 60e3) await fail(part, new Error(`${REEL_TIMEOUT_MIN}분 넘게 영상 처리가 끝나지 않음`));
     } catch (e) { await fail(part, e); }
   }
   // 2) Start one approved part per tick (keeps subrequests < 50). Carousels first.
+  //    이번 tick 에 이미 게시(마무리)를 했다면 새 작업은 다음 tick 으로 미룬다.
+  if (heavy) return;
   const part = parts.find((k) => p[k] === "approved");
   if (!part) return;
-  const m = await manifest(ymd);
+  const m = mf || (await manifest(ymd));
   if (!m) return fail(part, new Error("manifest 없음"));
   try {
     if (REELS.includes(part)) {
@@ -425,8 +476,9 @@ async function maybePublish(env, now) {
       await putPost(env, ymd, p); await refreshControl(env, ymd, p);
     } else if (THREADS.includes(part)) {
       const k = part.slice(3);
-      p[part] = "publishing"; await putPost(env, ymd, p);
-      await done(part, await publishThreads(env, m[k], ymd, m.captions[k]));
+      p[part + "_kids"] = await startThreads(env, m[k], ymd);
+      p[part] = "processing"; p[part + "_t"] = Date.now();
+      await putPost(env, ymd, p); await refreshControl(env, ymd, p);
     } else {
       p[part] = "publishing"; await putPost(env, ymd, p);
       await done(part, await publishCarousel(env, m[part], ymd, m.captions[part]));
