@@ -141,7 +141,25 @@ def chem_page(title, pairs, t):
             f'<span style="color:{t["accent"]}">💞 우리 둘 궁합 점수는 프로필 링크에서</span></div>')
     return f'<div class="wrap" style="gap:30px">{head}{cards}{tail}</div>'
 
-def outro(t, lines):
+# 사이트(ssong032/gunghap)에 띠별 신년운세 페이지(<연도>/)가 있는 해. 새 해 페이지를 만들면(tools/build_newyear.py) 여기에 추가.
+SITE_NEWYEAR_YEARS = {2027}
+
+def newyear_year(day):
+    """신년운세 시즌(12/1 ~ 2/3, 입춘 전)이고 사이트에 그해 페이지가 있으면 다가오는 해를, 아니면 None."""
+    if day.month == 12:
+        y = day.year + 1
+    elif day.month == 1 or (day.month == 2 and day.day <= 3):
+        y = day.year
+    else:
+        return None
+    return y if y in SITE_NEWYEAR_YEARS else None
+
+def label_date(d):
+    import re
+    m = re.match(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", d.get("date_label", ""))
+    return dt.date(*map(int, m.groups())) if m else None
+
+def outro(t, lines, ny=None):
     return center(f"""
       <div class="e" style="font-size:130px">📩</div>
       <div style="font-size:70px;font-weight:900;line-height:1.3">{lines}</div>
@@ -149,7 +167,7 @@ def outro(t, lines):
         <div style="background:{t['card']};padding:22px 40px;border-radius:999px">📩 친구에게 보내서 운세 비교하기</div>
         <div style="background:{t['card']};padding:22px 40px;border-radius:999px">📌 저장하고 하루 3번 꺼내보기</div>
         <div style="background:{t['ink']};color:#fff;padding:22px 40px;border-radius:999px">🔔 팔로우하면 매일 아침 6시 업데이트</div>
-        <div style="background:{t['accent']};color:#fff;padding:22px 40px;border-radius:999px">🔮 프로필 링크에서 내 사주·궁합 보기</div>
+        <div style="background:{t['accent']};color:#fff;padding:22px 40px;border-radius:999px">{'🎍 프로필 링크에서 ' + str(ny) + ' 신년운세 보기' if ny else '🔮 프로필 링크에서 내 사주·궁합 보기'}</div>
       </div>""")
 
 def iljin_line(d):
@@ -164,6 +182,8 @@ def build(d):
     pages = []
     tz, tm = THEMES["zodiac"], THEMES["mbti"]
     ij = iljin_line(d)
+    ld = label_date(d)
+    NY = newyear_year(ld) if ld else None
     ij_html = lambda t: (f'<div style="font-size:34px;font-weight:700;color:{t["accent"]};background:{t["card"]};'
                          f'padding:10px 30px;border-radius:999px">🗓 {esc(ij)}</div>') if ij else ""
     zs = d["zodiac"]
@@ -185,7 +205,7 @@ def build(d):
         pages.append(("zodiac", body, "띠별 운세"))
     if d.get("ddi_chem"):
         pages.append(("zodiac", chem_page("오늘의 찰떡 궁합", d["ddi_chem"][:3], tz), "띠별 운세"))
-    pages.append(("zodiac", outro(tz, "오늘 내 띠<br>몇 위였나요?"), "띠별 운세"))
+    pages.append(("zodiac", outro(tz, "오늘 내 띠<br>몇 위였나요?", NY), "띠별 운세"))
 
     groups = d["mbti_groups"]
     flat = [t for g in groups for t in g["types"]]
@@ -207,7 +227,7 @@ def build(d):
         m_pages.append(("mbti", f'<div class="wrap" style="gap:26px">{title}{rows}</div>', "MBTI 운세"))
     if d.get("mbti_chem"):
         m_pages.append(("mbti", chem_page("오늘의 MBTI 케미", d["mbti_chem"][:3], tm), "MBTI 운세"))
-    m_pages.append(("mbti", outro(tm, "오늘 내 MBTI<br>몇 위였나요?"), "MBTI 운세"))
+    m_pages.append(("mbti", outro(tm, "오늘 내 MBTI<br>몇 위였나요?", NY), "MBTI 운세"))
 
     out = []
     for n, (th, body, head) in enumerate(pages, 1):
@@ -305,6 +325,15 @@ SITE_LINES = {
              "💞 그 사람이랑 나, 궁합 몇 점? → 프로필 링크",
              "💞 MBTI 궁합부터 오늘의 사주까지 → 프로필 링크"],
 }
+# 신년운세 시즌(12/1 ~ 입춘 전)에는 이 줄로 바꿔서 사이트의 {Y}/ 띠별 신년운세 페이지로 보낸다
+SITE_LINES_NY = {
+    "ddi": ["🎍 {Y} 띠별 신년운세 순위 무료 공개 → 프로필 링크",
+            "🎍 {Y} 내 띠 운세 · 출생연도별 · 좋은 달까지 → 프로필 링크",
+            "🎍 {Y} 띠별 운세 1위는 누구? → 프로필 링크"],
+    "mbti": ["🎍 내 생년월일로 보는 {Y} 신년운세 (무료) → 프로필 링크",
+             "🎍 {Y} 신년운세 · 월별 흐름 그래프까지 → 프로필 링크",
+             "🎍 {Y} 띠별 순위 + 내 사주 신년운세 → 프로필 링크"],
+}
 
 def add_site_line(cap, kind, date_name):
     """Insert the site line after the 📌 save line (or just before the hashtags)."""
@@ -314,7 +343,12 @@ def add_site_line(cap, kind, date_name):
         n = dt.date.fromisoformat(date_name).toordinal()
     except ValueError:
         n = 0
-    line = SITE_LINES[kind][n % len(SITE_LINES[kind])]
+    try:
+        ny = newyear_year(dt.date.fromisoformat(date_name))
+    except ValueError:
+        ny = None
+    pool = [x.format(Y=ny) for x in SITE_LINES_NY[kind]] if ny else SITE_LINES[kind]
+    line = pool[n % len(pool)]
     lines = cap.split("\n")
     at = next((i + 1 for i, l in enumerate(lines) if l.startswith("📌")), None)
     if at is None:
