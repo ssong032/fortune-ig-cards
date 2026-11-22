@@ -55,7 +55,7 @@ body{{background:{t['bg']};color:{t['ink']};font-family:{FONT};position:relative
   padding:12px 26px;font-size:30px;font-weight:600;margin-right:14px}}
 .sw{{width:30px;height:30px;border-radius:50%;border:2px solid rgba(0,0,0,.12);display:inline-block}}
 </style></head><body>
-<div class="head"><span>{esc(header)}</span><span>{idx} / {total}</span></div>
+<div class="head"><span>{esc(header)}</span><span>{f"{idx} / {total}" if total else "REELS"}</span></div>
 {body}
 <div class="foot">재미로 보는 운세예요 🙂</div>
 </body></html>"""
@@ -230,6 +230,18 @@ def build(d):
     m_pages.append(("mbti", outro(tm, "오늘 내 MBTI<br>몇 위였나요?", NY), "MBTI 운세"))
 
     out = []
+    # 릴스 첫 화면(후킹): data["hook"] = {"ddi": "...", "mbti": "..."} (마케팅부 브리프에서 옴). 캐러셀에는 안 들어가고 릴스 맨 앞에만 붙는다.
+    hooks = d.get("hook") or {}
+    for key, th, t, label in (("ddi", "zodiac", tz, "띠별 운세"), ("mbti", "mbti", tm, "MBTI 운세")):
+        text = (hooks.get(key) or "").strip()
+        if not text:
+            continue
+        sub = "끝까지 보면 내 순위가 나와요 👇" if key == "ddi" else "끝까지 보면 내 MBTI 순위 공개 👇"
+        body = center(f"""
+      <div class="e" style="font-size:150px;line-height:1">{'🔮' if key == 'ddi' else '🧠'}</div>
+      <div style="font-size:84px;font-weight:900;line-height:1.25;color:{t['ink']}">{esc(text)}</div>
+      <div style="font-size:40px;font-weight:700;background:{t['accent']};color:#fff;padding:20px 44px;border-radius:999px">{sub}</div>""")
+        out.append((f"hook_{key}.png", page(th, body, "", "", f"{d['date_short']} · {label}")))
     for n, (th, body, head) in enumerate(pages, 1):
         out.append((f"ddi_{n:02d}.png", page(th, body, n, len(pages), f"{d['date_short']} · {head}")))
     for n, (th, body, head) in enumerate(m_pages, 1):
@@ -387,7 +399,7 @@ def main():
     a = ap.parse_args()
     d = json.load(open(a.data, encoding="utf-8"))
     out = Path(a.out).resolve(); (out / "html").mkdir(parents=True, exist_ok=True)
-    for old in [*out.glob("ddi_*.png"), *out.glob("mbti_*.png"), *out.glob("ddi_*.jpg"), *out.glob("mbti_*.jpg")]:
+    for old in [*out.glob("ddi_*.png"), *out.glob("mbti_*.png"), *out.glob("ddi_*.jpg"), *out.glob("mbti_*.jpg"), *out.glob("hook_*.png")]:
         old.unlink()  # slide count can change between runs
     br = find_browser(a.browser)
     pages = build(d)
@@ -410,10 +422,11 @@ def main():
     reels = None
     if not a.no_reel:
         names = [n for n, _ in pages]
-        make_reel(out, [n for n in names if n.startswith("ddi_")], "0xF9E2D3", out / "reel_ddi.mp4", pick_music(out.name, 0))
-        make_reel(out, [n for n in names if n.startswith("mbti_")], "0xE6ECFB", out / "reel_mbti.mp4", pick_music(out.name, 3))
+        hook = lambda k: [f"hook_{k}.png"] if f"hook_{k}.png" in names else []  # 후킹 화면이 있으면 릴스 맨 앞에
+        make_reel(out, hook("ddi") + [n for n in names if n.startswith("ddi_")], "0xF9E2D3", out / "reel_ddi.mp4", pick_music(out.name, 0))
+        make_reel(out, hook("mbti") + [n for n in names if n.startswith("mbti_")], "0xE6ECFB", out / "reel_mbti.mp4", pick_music(out.name, 3))
         reels = {"ddi": "reel_ddi.mp4", "mbti": "reel_mbti.mp4"}
-    write_publish_files(out, d, [n for n, _ in pages], reels)
+    write_publish_files(out, d, [n for n, _ in pages if not n.startswith("hook_")], reels)
 
 if __name__ == "__main__":
     main()
