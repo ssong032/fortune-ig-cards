@@ -20,6 +20,9 @@ const KST = 9 * 3600 * 1000;
 const PUBLISH_HOUR = 6;
 const NOTIFY_FROM_HOUR = 15; // look for tomorrow's cards from 15:00 KST (routine renders them at 14:30)
 const REMIND_HOUR = 23;
+// 2026-11-25 CEO 결정: 승인 없이 자동 게시. 준비되면 전부 자동 승인하고 텔레그램은 알림 + 취소 버튼만 보낸다.
+// 검수표(brief/D_qa.md)가 명확히 '보류'면 자동 승인하지 않고 예전처럼 승인을 기다린다.
+const AUTO_PUBLISH = true;
 const TOKEN_REFRESH_DAYS = 45;
 // Videos come through jsDelivr (same repo): raw.githubusercontent serves .mp4 as
 // application/octet-stream, which Instagram's video fetcher may reject; jsDelivr sends video/mp4.
@@ -77,6 +80,13 @@ const clip = (v, n = 60) => (typeof v === "string" && v.trim() ? (v.length > n ?
 // 검수표의 최종 판정: "ok" | "hold" | "unknown". 못 읽으면 절대 "ok" 로 보지 않는다.
 function qaVerdict(qa) {
   const lines = qa.replace(/\r/g, "").split("\n");
+  const fin = lines.filter((l) => /최종\s*판정\s*[:：]/.test(l)).pop();
+  if (fin && /가능/.test(fin) && /보류/.test(fin)) return "unknown"; // 양식을 안 채운 채(가능|보류)면 판정 없음
+  if (fin) {
+    const fm = fin.replace(/^.*?최종\s*판정\s*[:：]/, "").replace(/가능\s*[\/|]\s*보류/g, " ")
+      .match(/(보류|불가|수정\s*후|조건부|\bhold\b|reject)|((?<!불)가능|\bpass\b|\bok\b)/i);
+    if (fm) return fm[1] ? "hold" : "ok";
+  }
   const idx = lines.findIndex((l) => /게시\s*가능\s*여부|최종\s*판정/.test(l));
   if (idx < 0) return "unknown";
   const clean = (l) => l.replace(/\(?\s*가능\s*\/\s*보류\s*\)?/g, " ").replace(/게시\s*가능\s*여부/g, " ").replace(/최종\s*판정/g, " ");
@@ -87,8 +97,7 @@ function qaVerdict(qa) {
   return "unknown";
 }
 function qaScore(qa) {
-  const src = qa.split("\n").find((l) => /품질/.test(l) && /\d/.test(l)) || qa;
-  const m = src.match(/(\d{1,3})\s*\/\s*100/) || src.match(/(\d{1,3})\s*점(?!\s*만점)/);
+  const m = qa.match(/품질[^\n\d]*?(\d{1,3})\s*(?:\/\s*100|점(?!\s*만점))/);
   return m && +m[1] <= 100 ? m[1] : null;
 }
 async function briefSummary(ymd) {
@@ -393,7 +402,7 @@ async function maybeRefreshToken(env) {
   }
 }
 
-async function maybeNotify(env, now) {
+async function maybeNotify(env, now, opt = {}) {
   const target = now.hour >= NOTIFY_FROM_HOUR ? addDays(now.ymd, 1) : now.hour < PUBLISH_HOUR ? now.ymd : null;
   if (!target) return;
   const p = await getPost(env, target);
@@ -416,11 +425,17 @@ async function maybeNotify(env, now) {
   const vids = CARDS.filter((k) => reels[k]).map((k) => ({ type: "video", media: `${CDN}/images/${target}/${reels[k]}`, caption: PARTS["reel_" + k] }));
   if (vids.length) await tg(env, "sendMediaGroup", { chat_id: chat, media: vids });
   p.parts = await partsFor(env, m);
+  if (AUTO_PUBLISH && !opt.force && !p.parts.some((k) => p[k])) {
+    const qa = (await rawText(`brief/${target}_qa.md`)) || "";
+    if (qa.trim() && qaVerdict(qa) === "hold") p.auto_held = true;
+    else { for (const k of p.parts) p[k] = "approved"; p.auto = true; }
+  }
   const cap = (s) => s.split("\n").slice(0, 3).join("\n");
-  p.head = `📅 ${label(target)} 운세 준비 완료\n\n🐭 띠별 캡션\n${cap(m.captions.ddi)}\n\n🧠 MBTI 캡션\n${cap(m.captions.mbti)}\n\n${vids.length ? "릴스는 같은 캡션으로 올라가요. " : ""}승인하면 ${label(target)} 오전 6시에 인스타에 자동 게시돼요.`;
+  p.head = `📅 ${label(target)} 운세 준비 완료\n\n🐭 띠별 캡션\n${cap(m.captions.ddi)}\n\n🧠 MBTI 캡션\n${cap(m.captions.mbti)}\n\n${vids.length ? "릴스는 같은 캡션으로 올라가요. " : ""}${p.auto ? `🤖 자동 승인됨: ${label(target)} 오전 6시에 자동 게시돼요. 막으려면 아래 '승인 취소'를 눌러 주세요.` : p.auto_held ? "⚠️ 검수에서 '보류'가 나와서 자동 게시를 멈췄어요. 확인 후 승인해 주세요." : `승인하면 ${label(target)} 오전 6시에 인스타에 자동 게시돼요.`}`;
   try { const sum = await briefSummary(target); if (sum && (p.head.length + sum.length) < 3500) p.head += `\n\n${sum}`; } catch (e) { console.log("brief summary error", e.stack); }
   const sent = await tg(env, "sendMessage", { chat_id: chat, text: `${p.head}\n\n${statusLine(p)}`, reply_markup: keyboard(target, p), disable_web_page_preview: true });
   p.msg_id = sent.result && sent.result.message_id;
+  if (!p.msg_id && p.auto) { for (const k of p.parts) if (p[k] === "approved") delete p[k]; delete p.auto; }
   await putPost(env, target, p);
 }
 
@@ -540,6 +555,7 @@ async function onUpdate(env, u) {
     note = "이번 회차는 건너뛸게요";
   } else if (op === "C") {
     for (const k of parts) if (["approved", "skipped"].includes(p[k])) delete p[k];
+    if (p.auto) { p.head = p.head.replace(/🤖[^\n]*/, "↩️ 자동 게시를 취소했어요. 승인 버튼을 누르면 다시 6시 게시 예정이 돼요."); delete p.auto; }
     note = "승인을 취소했어요";
   } else if (op === "R") {
     for (const k of parts) if (p[k] === "error") p[k] = "approved";
@@ -604,7 +620,7 @@ export default {
       if (url.searchParams.get("force") === "1") { // re-send a fresh message, keeping approvals already made
         const old = await getPost(env, d); delete old.msg_id; delete old.reminded; await putPost(env, d, old);
       }
-      await maybeNotify(env, { ymd: addDays(d, -1), hour: NOTIFY_FROM_HOUR });
+      await maybeNotify(env, { ymd: addDays(d, -1), hour: NOTIFY_FROM_HOUR }, { force: url.searchParams.get("force") === "1" });
       return new Response((await getPost(env, d)).msg_id ? "notified" : "no manifest / no owner");
     }
     if (url.pathname === "/reelcheck" && url.searchParams.get("k") === env.WEBHOOK_SECRET) {
